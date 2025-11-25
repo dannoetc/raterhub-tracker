@@ -168,6 +168,11 @@ $totalSeconds   = ($questions | Measure-Object -Property DurationSeconds -Sum).S
 $avgSeconds     = if ($totalQuestions -gt 0) { [math]::Round($totalSeconds / $totalQuestions, 2) } else { 0 }
 $totalMinutes   = [math]::Round($totalSeconds / 60, 2)
 
+function Format-TimeMMSS($seconds) {
+    $ts = [TimeSpan]::FromSeconds($seconds)
+    return "{0:00}:{1:00}" -f [math]::Floor($ts.TotalMinutes), $ts.Seconds
+}
+
 $rowsHtml = $questions | ForEach-Object {
     "<tr>
         <td>$($_.QuestionNumber)</td>
