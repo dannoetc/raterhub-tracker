@@ -1,13 +1,14 @@
 param(
     [string]$OutputFolder = "$env:USERPROFILE\Documents\RaterHubTracker",
-    [switch]$LaunchEdgeIfNeeded
+    [switch]$LaunchEdgeIfNeeded,
+    [double]$TargetMinutesPerQuestion = 5.5  # AHT target (5.5 min per spec for Severity tasks)
 )
 
 # -----------------------------
 # Config
 # -----------------------------
 $RaterHubUrl   = 'https://raterhub.com/evaluation/rater'
-$TabTitleHint  = 'Rater Hub'   # adjust if needed
+$TabTitleHint  = 'Rater Hub'
 $today         = Get-Date -Format 'yyyy-MM-dd'
 $sessionId     = [guid]::NewGuid().ToString()
 
@@ -19,7 +20,39 @@ $csvPath       = Join-Path $OutputFolder ("RaterHub-{0}.csv" -f $today)
 $htmlPath      = Join-Path $OutputFolder ("RaterHubSession-{0}-{1}.html" -f $today, (Get-Date -Format 'HHmmss'))
 
 # -----------------------------
-# Ensure folders exist
+# Helpers
+# -----------------------------
+function Format-TimeMMSS($seconds) {
+    $ts = [TimeSpan]::FromSeconds($seconds)
+    return "{0:00}:{1:00}" -f [math]::Floor($ts.TotalMinutes), $ts.Seconds
+}
+
+function Add-QuestionRecord {
+    param(
+        [int]      $QuestionNumber,
+        [datetime] $Start,
+        [datetime] $End,
+        [string]   $SessionId,
+        [double]   $EffectiveSeconds
+    )
+
+    if ($EffectiveSeconds -lt 0) { $EffectiveSeconds = 0 }
+
+    $duration = [TimeSpan]::FromSeconds($EffectiveSeconds)
+
+    [PSCustomObject]@{
+        Date             = $Start.ToString('yyyy-MM-dd')
+        SessionId        = $SessionId
+        QuestionNumber   = $QuestionNumber
+        StartTime        = $Start.ToString('HH:mm:ss')
+        EndTime          = $End.ToString('HH:mm:ss')
+        DurationSeconds  = [math]::Round($EffectiveSeconds, 2)
+        DurationMinutes  = [math]::Round($duration.TotalMinutes, 2)
+    }
+}
+
+# -----------------------------
+# Ensure folders & signal file
 # -----------------------------
 foreach ($folder in @($OutputFolder, $SignalFolder)) {
     if (-not (Test-Path $folder)) {
@@ -27,7 +60,6 @@ foreach ($folder in @($OutputFolder, $SignalFolder)) {
     }
 }
 
-# Ensure signal file exists and is empty
 if (-not (Test-Path $SignalFile)) {
     New-Item -Path $SignalFile -ItemType File -Force | Out-Null
 } else {
@@ -35,7 +67,7 @@ if (-not (Test-Path $SignalFile)) {
 }
 
 # -----------------------------
-# Optionally launch Edge to RaterHub
+# Optionally launch Edge
 # -----------------------------
 if ($LaunchEdgeIfNeeded) {
     $edgeWithRater = Get-Process msedge -ErrorAction SilentlyContinue |
@@ -49,42 +81,30 @@ if ($LaunchEdgeIfNeeded) {
 Write-Host "RaterHub session tracker (hotkey-driven) started." -ForegroundColor Cyan
 Write-Host "Session ID: $sessionId"
 Write-Host "Signal file: $SignalFile"
-Write-Host "Use AHK hotkeys to record NEXT/EXIT events." -ForegroundColor Yellow
+Write-Host "Hotkeys:"
+Write-Host "  Ctrl+Q         → NEXT question"
+Write-Host "  Ctrl+Alt+Q     → PAUSE / RESUME"
+Write-Host "  Ctrl+Shift+Q   → END session" -ForegroundColor Yellow
+Write-Host ""
 
 # -----------------------------
-# Data structure for captured questions
+# Data structures
 # -----------------------------
 $questions = New-Object System.Collections.Generic.List[object]
 
-$questionNumber = 1
-$questionStart  = Get-Date
-$sessionEnded   = $false
+$questionNumber       = 1
+$questionStart        = Get-Date
+$sessionEnded         = $false
+
+# pause tracking
+$isPaused             = $false
+$pauseStart           = $null
+$pauseOffsetSeconds   = 0.0   # accumulated paused time for current question
 
 Write-Host ("Question {0} started at {1}" -f $questionNumber, $questionStart) -ForegroundColor Yellow
 
-function Add-QuestionRecord {
-    param(
-        [int]      $QuestionNumber,
-        [datetime] $Start,
-        [datetime] $End,
-        [string]   $SessionId
-    )
-
-    $duration = $End - $Start
-
-    [PSCustomObject]@{
-        Date             = $Start.ToString('yyyy-MM-dd')
-        SessionId        = $SessionId
-        QuestionNumber   = $QuestionNumber
-        StartTime        = $Start.ToString('HH:mm:ss')
-        EndTime          = $End.ToString('HH:mm:ss')
-        DurationSeconds  = [math]::Round($duration.TotalSeconds, 2)
-        DurationMinutes  = [math]::Round($duration.TotalMinutes, 2)
-    }
-}
-
 # -----------------------------
-# Main loop: watch for signals from AHK
+# Main loop: watch for signals
 # -----------------------------
 while (-not $sessionEnded) {
     try {
@@ -93,41 +113,91 @@ while (-not $sessionEnded) {
                         Where-Object { $_ -match '\S' }
 
             if ($commands -and $commands.Count -gt 0) {
-                # Clear the file so we don't reprocess these commands
                 Clear-Content -Path $SignalFile -ErrorAction SilentlyContinue
 
                 foreach ($cmdLine in $commands) {
                     $clean = ($cmdLine -split '\s+')[0].ToUpper()
 
                     switch ($clean) {
+                        'PAUSE' {
+                            if (-not $isPaused) {
+                                $isPaused   = $true
+                                $pauseStart = Get-Date
+                                Write-Host "[SIGNAL] PAUSE → timing paused" -ForegroundColor DarkYellow
+                            }
+                            else {
+                                # resume and accumulate paused time first
+                                $pauseEnd = Get-Date
+                                if ($pauseStart) {
+                                    $pauseOffsetSeconds += ($pauseEnd - $pauseStart).TotalSeconds
+                                }
+                                $pauseStart = $null
+                                $isPaused   = $false
+                                Write-Host "[SIGNAL] PAUSE → resumed" -ForegroundColor DarkYellow
+                            }
+                        }
+
                         'NEXT' {
-                            # End current question and start next
-                            $questionEnd = Get-Date
+                            # If paused, auto-resume and close out pause time first
+                            if ($isPaused -and $pauseStart) {
+                                $pauseEnd = Get-Date
+                                $pauseOffsetSeconds += ($pauseEnd - $pauseStart).TotalSeconds
+                                $pauseStart = $null
+                                $isPaused   = $false
+                            }
+
+                            $questionEnd   = Get-Date
+                            $rawSeconds    = ($questionEnd - $questionStart).TotalSeconds
+                            $effectiveSecs = $rawSeconds - $pauseOffsetSeconds
+
                             $record = Add-QuestionRecord -QuestionNumber $questionNumber `
                                                          -Start $questionStart `
                                                          -End $questionEnd `
-                                                         -SessionId $sessionId
+                                                         -SessionId $sessionId `
+                                                         -EffectiveSeconds $effectiveSecs
                             $questions.Add($record) | Out-Null
-                            Write-Host ("[SIGNAL] NEXT → recorded Question {0}: {1} seconds" -f $questionNumber, $record.DurationSeconds) -ForegroundColor Green
+
+                            Write-Host ("[SIGNAL] NEXT → recorded Question {0}: {1} sec (active)" -f $questionNumber, $record.DurationSeconds) -ForegroundColor Green
+
+                            # reset pause info for next question
+                            $pauseOffsetSeconds = 0.0
+                            $pauseStart         = $null
+                            $isPaused           = $false
 
                             $questionNumber++
                             $questionStart = Get-Date
                             Write-Host ("Question {0} started at {1}" -f $questionNumber, $questionStart) -ForegroundColor Yellow
                         }
+
                         'EXIT' {
-                            # End current question and end session
-                            $questionEnd = Get-Date
+                            # finish current question then end session
+                            if ($isPaused -and $pauseStart) {
+                                $pauseEnd = Get-Date
+                                $pauseOffsetSeconds += ($pauseEnd - $pauseStart).TotalSeconds
+                                $pauseStart = $null
+                                $isPaused   = $false
+                            }
+
+                            $questionEnd   = Get-Date
+                            $rawSeconds    = ($questionEnd - $questionStart).TotalSeconds
+                            $effectiveSecs = $rawSeconds - $pauseOffsetSeconds
+
                             $record = Add-QuestionRecord -QuestionNumber $questionNumber `
                                                          -Start $questionStart `
                                                          -End $questionEnd `
-                                                         -SessionId $sessionId
+                                                         -SessionId $sessionId `
+                                                         -EffectiveSeconds $effectiveSecs
                             $questions.Add($record) | Out-Null
-                            Write-Host ("[SIGNAL] EXIT → recorded final Question {0}" -f $questionNumber) -ForegroundColor Green
 
-                            $sessionEnded = $true
+                            Write-Host ("[SIGNAL] EXIT → recorded final Question {0}: {1} sec (active)" -f $questionNumber, $record.DurationSeconds) -ForegroundColor Green
+
+                            $sessionEnded       = $true
+                            $pauseOffsetSeconds = 0.0
+                            $pauseStart         = $null
+                            $isPaused           = $false
                         }
+
                         default {
-                            # Ignore unknown commands for now
                             Write-Host "[WARN] Unknown signal received: '$clean'" -ForegroundColor DarkYellow
                         }
                     }
@@ -142,50 +212,99 @@ while (-not $sessionEnded) {
     Start-Sleep -Milliseconds 200
 }
 
-# -----------------------------
-# Persist to CSV (per-day file)
-# -----------------------------
-if ($questions.Count -gt 0) {
-    if (-not (Test-Path $csvPath)) {
-        $questions | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
-        Write-Host "Created new CSV: $csvPath" -ForegroundColor Cyan
-    }
-    else {
-        $questions | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8 -Append
-        Write-Host "Appended to CSV: $csvPath" -ForegroundColor Cyan
-    }
-}
-else {
+if ($questions.Count -eq 0) {
     Write-Host "No questions recorded; skipping CSV & HTML." -ForegroundColor Yellow
     return
 }
 
 # -----------------------------
-# Generate HTML report for this session
+# Persist to CSV
+# -----------------------------
+if (-not (Test-Path $csvPath)) {
+    $questions | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+    Write-Host "Created new CSV: $csvPath" -ForegroundColor Cyan
+} else {
+    $questions | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8 -Append
+    Write-Host "Appended to CSV: $csvPath" -ForegroundColor Cyan
+}
+
+# -----------------------------
+# Metrics for dashboard
 # -----------------------------
 $totalQuestions = $questions.Count
 $totalSeconds   = ($questions | Measure-Object -Property DurationSeconds -Sum).Sum
-$avgSeconds     = if ($totalQuestions -gt 0) { [math]::Round($totalSeconds / $totalQuestions, 2) } else { 0 }
-$totalMinutes   = [math]::Round($totalSeconds / 60, 2)
+if (-not $totalSeconds) { $totalSeconds = 0 }
 
-function Format-TimeMMSS($seconds) {
-    $ts = [TimeSpan]::FromSeconds($seconds)
-    return "{0:00}:{1:00}" -f [math]::Floor($ts.TotalMinutes), $ts.Seconds
+$avgSeconds = if ($totalQuestions -gt 0) { $totalSeconds / $totalQuestions } else { 0 }
+$totalMinutes = [math]::Round($totalSeconds / 60, 2)
+
+$avgMMSS       = Format-TimeMMSS $avgSeconds
+$targetSeconds = $TargetMinutesPerQuestion * 60
+$ratio         = if ($targetSeconds -gt 0) { $avgSeconds / $targetSeconds } else { 0 }
+
+# Pace label + emoji + score
+if ($totalQuestions -eq 0) {
+    $paceLabel = "No questions this session"
+    $paceEmoji = "😴"
+    $sessionScore = 0
+}
+else {
+    if     ($ratio -lt 0.5) { $paceLabel = "way too fast (<50% of target)"; $paceEmoji = "⚡🐇" }
+    elseif ($ratio -lt 0.7) { $paceLabel = "fast (50–70% of target)";       $paceEmoji = "🐇"   }
+    elseif ($ratio -lt 0.9) { $paceLabel = "slightly fast";                 $paceEmoji = "🙂"   }
+    elseif ($ratio -lt 1.1) { $paceLabel = "on target";                     $paceEmoji = "💜✅" }
+    elseif ($ratio -lt 1.3) { $paceLabel = "a bit slow";                    $paceEmoji = "🐢"   }
+    else                    { $paceLabel = "slow, consider picking up";     $paceEmoji = "🐌"   }
+
+    # Smooth score centered at ratio=1, decays with distance
+    $sessionScore = [math]::Round(
+        [math]::Max(0, [math]::Min(100, 100 * [math]::Exp(-1.2 * [math]::Abs($ratio - 1))))
+    )
 }
 
+# Sparkline for question times
+$maxSeconds = ($questions | Measure-Object -Property DurationSeconds -Maximum).Maximum
+if ($maxSeconds -lt 1) { $maxSeconds = 1 }
+
+$sparkBars = @()
+for ($i = 0; $i -lt $questions.Count; $i++) {
+    $q = $questions[$i]
+    $h = [math]::Round(($q.DurationSeconds / $maxSeconds) * 100)
+    if ($h -lt 3) { $h = 3 }  # minimum visible bar
+    $x = $i
+    $y = 100 - $h
+    $class = if ($q.DurationSeconds -eq $maxSeconds) { "bar max" } else { "bar" }
+    $sparkBars += "<rect class='$class' x='$x' y='$y' width='0.8' height='$h' />"
+}
+$sparkBarsStr = ($sparkBars -join "")
+$sparklineSvg = "<svg viewBox='0 0 $($questions.Count) 100' preserveAspectRatio='none' class='sparkline'>$sparkBarsStr</svg>"
+
+# Build rows with mm:ss + bar
 $rowsHtml = $questions | ForEach-Object {
+    $mmss = Format-TimeMMSS $_.DurationSeconds
+    $percent = [math]::Round(($_.DurationSeconds / $maxSeconds) * 100, 2)
+
     "<tr>
         <td>$($_.QuestionNumber)</td>
         <td>$($_.StartTime)</td>
         <td>$($_.EndTime)</td>
-        <td style='text-align:right;'>$($_.DurationSeconds)</td>
-        <td style='text-align:right;'>$($_.DurationMinutes)</td>
+        <td>
+            <div class='time-cell'>
+                <span class='time-text'>$mmss</span>
+                <div class='time-bar'>
+                    <div class='time-bar-fill' style='width:$percent%;'></div>
+                </div>
+            </div>
+        </td>
     </tr>"
 } | Out-String
 
 $sessionStart = ($questions | Select-Object -First 1).StartTime
 $sessionEnd   = ($questions | Select-Object -Last 1).EndTime
 
+# -----------------------------
+# HTML dashboard (purple, sparkline, emojis)
+# -----------------------------
 $html = @"
 <!DOCTYPE html>
 <html>
@@ -199,21 +318,17 @@ $html = @"
             --accent: #6c5ce7;
             --accent-soft: #a29bfe;
             --accent-dark: #4834d4;
+            --accent-light: #dcd2ff;
             --text-main: #2d2440;
             --text-muted: #6c657e;
             --border-subtle: #e4ddff;
             --table-header: #f0e9ff;
-            --danger: #e17055;
-        }
-
-        * {
-            box-sizing: border-box;
         }
 
         body {
             margin: 0;
             padding: 24px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            font-family: "Segoe UI", Arial, sans-serif;
             background: radial-gradient(circle at top left, #fce1ff 0, #f7f3ff 40%, #ffffff 100%);
             color: var(--text-main);
         }
@@ -227,49 +342,27 @@ $html = @"
             background: var(--card-bg);
             border-radius: 16px;
             border: 1px solid var(--border-subtle);
-            box-shadow:
-                0 10px 30px rgba(0, 0, 0, 0.05),
-                0 0 0 1px rgba(255, 255, 255, 0.8);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
             padding: 24px 28px;
         }
 
         h1 {
             font-size: 26px;
-            margin: 0 0 8px 0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: var(--accent-dark);
-        }
-
-        h1 span.badge {
-            font-size: 11px;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            padding: 2px 8px;
-            border-radius: 999px;
-            border: 1px solid var(--accent-soft);
-            background: #f9f6ff;
-            color: var(--accent-dark);
-        }
-
-        h2 {
-            font-size: 18px;
-            margin: 24px 0 8px;
+            margin: 0 0 6px;
             color: var(--accent-dark);
         }
 
         .subtitle {
-            margin-bottom: 18px;
             font-size: 13px;
             color: var(--text-muted);
+            margin-bottom: 14px;
         }
 
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 14px;
-            margin-top: 8px;
+            margin: 18px 0 16px;
         }
 
         .summary-item {
@@ -281,15 +374,15 @@ $html = @"
 
         .summary-label {
             font-size: 11px;
-            letter-spacing: 0.08em;
             text-transform: uppercase;
             color: var(--text-muted);
-            margin-bottom: 4px;
+            letter-spacing: 0.06em;
         }
 
         .summary-value {
+            margin-top: 4px;
             font-size: 15px;
-            font-weight: 600;
+            font-weight: bold;
             color: var(--accent-dark);
         }
 
@@ -297,21 +390,50 @@ $html = @"
             color: var(--accent);
         }
 
-        .summary-value.warn {
-            color: var(--danger);
+        .pace-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .spark-wrapper {
+            margin: 10px 0 18px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: #fbf9ff;
+            border: 1px dashed #e0d6ff;
+        }
+
+        .spark-header {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.08em;
+            margin-bottom: 4px;
+        }
+
+        .sparkline {
+            width: 100%;
+            height: 40px;
+        }
+
+        .sparkline rect.bar {
+            fill: var(--accent-soft);
+        }
+
+        .sparkline rect.bar.max {
+            fill: var(--accent-dark);
         }
 
         table {
             border-collapse: collapse;
             width: 100%;
-            margin-top: 10px;
             font-size: 13px;
         }
 
         th, td {
             border: 1px solid var(--border-subtle);
             padding: 6px 8px;
-            text-align: left;
         }
 
         th {
@@ -329,37 +451,47 @@ $html = @"
             background: #f3ecff;
         }
 
-        td.num {
+        .time-cell {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .time-text {
+            font-weight: 600;
+            color: var(--accent-dark);
+            width: 52px;
             text-align: right;
-            font-variant-numeric: tabular-nums;
+            font-family: Consolas, monospace;
+        }
+
+        .time-bar {
+            flex-grow: 1;
+            height: 10px;
+            border-radius: 6px;
+            background: var(--accent-light);
+            overflow: hidden;
+        }
+
+        .time-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 6px;
         }
 
         .footer-note {
-            margin-top: 14px;
+            margin-top: 16px;
             font-size: 11px;
             color: var(--text-muted);
-        }
-
-        .chip {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 999px;
-            background: #fbefff;
-            color: var(--accent-dark);
-            font-size: 11px;
-            margin-left: 4px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="card">
-            <h1>
-                RaterHub Session Report
-                <span class="badge">Daily Tracker</span>
-            </h1>
+            <h1>RaterHub Session Report 💜</h1>
             <div class="subtitle">
-                A quick snapshot of this rating session. Generated on <strong>$today</strong>.
+                Generated on <strong>$today</strong>. Each bar represents one question’s active time (pauses excluded).
             </div>
 
             <div class="summary-grid">
@@ -367,37 +499,49 @@ $html = @"
                     <div class="summary-label">Session ID</div>
                     <div class="summary-value">$sessionId</div>
                 </div>
+
                 <div class="summary-item">
                     <div class="summary-label">Session Window</div>
-                    <div class="summary-value">
-                        $sessionStart &ndash; $sessionEnd
-                    </div>
+                    <div class="summary-value">$sessionStart – $sessionEnd</div>
                 </div>
+
                 <div class="summary-item">
                     <div class="summary-label">Total Questions</div>
                     <div class="summary-value em">$totalQuestions</div>
                 </div>
+
                 <div class="summary-item">
-                    <div class="summary-label">Total Time</div>
-                    <div class="summary-value">
-                        $totalSeconds sec ($totalMinutes min)
-                    </div>
+                    <div class="summary-label">Total Active Time</div>
+                    <div class="summary-value">$totalMinutes min</div>
                 </div>
+
                 <div class="summary-item">
-                    <div class="summary-label">Average Time / Question</div>
-                    <div class="summary-value em">$avgSeconds sec</div>
+                    <div class="summary-label">Average per Question</div>
+                    <div class="summary-value em">$avgMMSS</div>
+                    <div class="pace-label">Target: $TargetMinutesPerQuestion min</div>
+                </div>
+
+                <div class="summary-item">
+                    <div class="summary-label">Session Pace & Score</div>
+                    <div class="summary-value">$paceEmoji $paceLabel</div>
+                    <div class="pace-label">Score: $sessionScore / 100</div>
                 </div>
             </div>
 
-            <h2>Per-Question Detail<span class="chip">Time spent per prompt</span></h2>
+            <div class="spark-wrapper">
+                <div class="spark-header">Question Time Sparkline</div>
+                $sparklineSvg
+            </div>
+
+            <h2 style="color: var(--accent-dark); margin-top: 24px;">Per-Question Breakdown</h2>
+
             <table>
                 <thead>
                     <tr>
                         <th>#</th>
                         <th>Start</th>
                         <th>End</th>
-                        <th>Seconds</th>
-                        <th>Minutes</th>
+                        <th>Time (mm:ss) + Visual</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -406,18 +550,13 @@ $html = @"
             </table>
 
             <div class="footer-note">
-                Tip: Shorter average times with consistent quality usually mean you're in a good flow. 💜
+                AHT is compared against an estimated target of $TargetMinutesPerQuestion minutes per question (current Severity-task expectation).
             </div>
         </div>
     </div>
 </body>
 </html>
 "@
-
-$html | Out-File -FilePath $htmlPath -Encoding UTF8
-Write-Host "HTML report written to: $htmlPath" -ForegroundColor Cyan
-Write-Host "RaterHub session tracker finished." -ForegroundColor Cyan
-
 
 $html | Out-File -FilePath $htmlPath -Encoding UTF8
 Write-Host "HTML report written to: $htmlPath" -ForegroundColor Cyan
