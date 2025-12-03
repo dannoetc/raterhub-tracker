@@ -677,3 +677,36 @@ def dashboard_today(
         "today.html",
         {"request": request, "summary": summary},
     )
+
+# ============================================================
+# Admin Debug: User Sessions 
+# ============================================================
+
+@app.get("/admin/debug/user-sessions")
+def debug_user_sessions(
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    Debug endpoint: list this user's sessions with basic info.
+
+    - Useful to verify that events are creating sessions as expected.
+    - Currently scoped to the authenticated user (no global admin view yet).
+    """
+    sessions = (
+        db.query(DbSession)
+        .filter(DbSession.user_id == current_user.id)
+        .order_by(DbSession.started_at.desc())
+        .all()
+    )
+
+    return [
+        {
+            "session_id": s.public_id,
+            "started_at": s.started_at,
+            "ended_at": s.ended_at,
+            "is_active": s.is_active,
+            "current_question_index": s.current_question_index,
+        }
+        for s in sessions
+    ]
