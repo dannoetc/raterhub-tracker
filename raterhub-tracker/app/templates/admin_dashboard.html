@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Debug Dashboard</title>
+
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            margin: 24px;
+            background: #faf8ff;
+        }
+
+        h1 {
+            color: #4b3b86;
+            margin-bottom: 6px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 420px;
+            margin-bottom: 30px;
+            background: #fff;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+
+        th, td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background: #f0eaff;
+            text-align: left;
+        }
+
+        tr:hover {
+            background: #f7f3ff;
+            cursor: pointer;
+        }
+
+        #events-box {
+            background: #fff;
+            padding: 16px;
+            border-radius: 10px;
+            width: 600px;
+            max-height: 600px;
+            overflow-y: auto;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+
+        pre {
+            white-space: pre-wrap;
+            font-size: 13px;
+            line-height: 1.3em;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>Admin Debug Dashboard</h1>
+<div class="subtitle">Welcome, {{ user.email }} — click a session to view raw events.</div>
+
+<h2>Recent Sessions</h2>
+
+<table>
+    <tr>
+        <th>Session ID</th>
+        <th>Started</th>
+        <th>Ended</th>
+    </tr>
+
+    {% for s in sessions %}
+    <tr onclick="loadEvents('{{ s.public_id }}')">
+        <td>{{ s.public_id }}</td>
+        <td>{{ s.started_at }}</td>
+        <td>{{ s.ended_at }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<h2>Session Event Log</h2>
+<div id="events-box">
+    <pre id="events-output">Select a session above to view events.</pre>
+</div>
+
+<script>
+async function loadEvents(sessionId) {
+    const output = document.getElementById("events-output");
+    output.textContent = "Loading...";
+
+    try {
+        const res = await fetch(`/admin/debug/user-events/${sessionId}`);
+        if (!res.ok) {
+            output.textContent = "Error loading events: " + res.statusText;
+            return;
+        }
+
+        const data = await res.json();
+
+        if (!Array.isArray(data) || data.length === 0) {
+            output.textContent = "No events for this session.";
+            return;
+        }
+
+        let text = "";
+        for (const e of data) {
+            text += `[${e.timestamp}] ${e.type} (event #${e.id})\n`;
+        }
+
+        output.textContent = text;
+    } catch (err) {
+        output.textContent = "Fetch error: " + err;
+    }
+}
+</script>
+
+</body>
+</html>

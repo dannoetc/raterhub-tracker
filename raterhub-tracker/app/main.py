@@ -555,6 +555,80 @@ def dashboard_session(
     )
 
 # ============================================================
+# Admin: THE FUCKING DASHBOARD!!!!!
+# ============================================================
+
+
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+def admin_dashboard(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    Admin/debug dashboard for the current user.
+    Lists recent sessions and loads raw event logs inline.
+    """
+    # Fetch recent sessions (reuse your logic)
+    sessions = (
+        db.query(DbSession)
+        .filter(DbSession.user_id == current_user.id)
+        .order_by(DbSession.started_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    # Render the base HTML; details are loaded via JS fetch() calls
+    return templates.TemplateResponse(
+        "admin_dashboard.html",
+        {
+            "request": request,
+            "sessions": sessions,
+            "user": current_user,
+        },
+    )
+
+
+
+# ============================================================
+# Debug: Recent Sessions 
+# ============================================================
+
+@app.get("/sessions/recent")
+def recent_sessions(
+    limit: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    List the current user's most recent sessions (up to `limit`).
+    Good for a 'recent sessions' list in the UI.
+    """
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+
+    sessions = (
+        db.query(DbSession)
+        .filter(DbSession.user_id == current_user.id)
+        .order_by(DbSession.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "session_id": s.public_id,
+            "started_at": s.started_at,
+            "ended_at": s.ended_at,
+            "is_active": s.is_active,
+            "current_question_index": s.current_question_index,
+        }
+        for s in sessions
+    ]
+
+# ============================================================
 # Today summary logic
 # ============================================================
 
@@ -709,4 +783,48 @@ def debug_user_sessions(
             "current_question_index": s.current_question_index,
         }
         for s in sessions
+    ]
+
+# ============================================================
+# Admin Debug: User Sessions (shows raw event stream of your session) 
+# ============================================================
+
+@app.get("/admin/debug/user-events/{session_public_id}")
+def debug_user_events(
+    session_public_id: str,
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    Debug endpoint: show the raw events for one of the current user's sessions.
+
+    This is scoped to the authenticated user:
+    - You can only see events for your own sessions.
+    """
+    session = (
+        db.query(DbSession)
+        .filter(
+            DbSession.public_id == session_public_id,
+            DbSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    events = (
+        db.query(Event)
+        .filter(Event.session_id == session.id)
+        .order_by(Event.timestamp.asc(), Event.id.asc())
+        .all()
+    )
+
+    return [
+        {
+            "id": e.id,
+            "type": e.type,
+            "timestamp": e.timestamp,
+        }
+        for e in events
     ]
