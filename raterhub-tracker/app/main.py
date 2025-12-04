@@ -761,23 +761,31 @@ def build_today_summary(db: OrmSession, user: User) -> TodaySummary:
 # ============================================================
 
 @app.get("/sessions/today", response_model=TodaySummary)
-def get_day_sessions(
-    date: Optional[str] = Query(
-        default=None,
-        description="Optional date in YYYY-MM-DD (UTC). If omitted, uses today."
-    ),
+def get_today_sessions(
     current_user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
 ):
-    if date:
-        try:
-            target_date = datetime.strptime(date, "%Y-%m-%d")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
-    else:
-        target_date = None  # build_day_summary will default to today
+    # Always "today" (UTC) for this endpoint
+    return build_today_summary(db, current_user, target_date=None)
 
-    return build_day_summary(db, current_user, target_date)
+
+@app.get("/sessions/day", response_model=TodaySummary)
+def get_sessions_for_day(
+    date: str = Query(..., description="Date in YYYY-MM-DD (UTC)"),
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    Get summary for a specific calendar day (UTC).
+    Example: /sessions/day?date=2025-12-03
+    """
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    return build_today_summary(db, current_user, target_date)
+
 
 @app.get("/dashboard/today", response_class=HTMLResponse)
 def dashboard_today(
@@ -793,13 +801,11 @@ def dashboard_today(
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
-            # Simple 400; you could render a nicer error in HTML if you like
             raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
     else:
-        target_date = None
+        target_date = None  # treat as "today"
 
     summary = build_day_summary(db, current_user, target_date)
-    # Pass the selected date string back for the date picker
     selected_date_str = summary.date.strftime("%Y-%m-%d") if summary.date else ""
 
     return templates.TemplateResponse(
@@ -810,7 +816,6 @@ def dashboard_today(
             "selected_date": selected_date_str,
         },
     )
-
 
 # ============================================================
 # Admin Debug: User Sessions 
