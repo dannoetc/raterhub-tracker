@@ -439,58 +439,70 @@ def post_event(
             # Delete the question row; we’re treating that NEXT as a mistake
             db.delete(last_q)
 
-    # ----- NEXT / EXIT -----
     elif event.type in ("NEXT", "EXIT"):
-        # If paused, close the pause interval
-        if session.is_paused and session.pause_started_at is not None:
-            delta = (ts - session.pause_started_at).total_seconds()
-            if delta > 0:
-                session.pause_accumulated_seconds += delta
-            session.is_paused = False
-            session.pause_started_at = None
-
-        # Ensure we have a start time
-        if session.current_question_started_at is None:
-            session.current_question_started_at = session.started_at or ts
-
-        # Compute raw + active seconds
-        raw_seconds = (ts - session.current_question_started_at).total_seconds()
-        if raw_seconds < 0:
-            raw_seconds = 0.0
-
-        active_seconds = raw_seconds - (session.pause_accumulated_seconds or 0.0)
-        if active_seconds < 0:
-            active_seconds = 0.0
-
-        q = Question(
-            session_id=session.id,
-            index=session.current_question_index,
-            started_at=session.current_question_started_at,
-            ended_at=ts,
-            raw_seconds=raw_seconds,
-            active_seconds=active_seconds,
+        # How many questions already stored for this session?
+        question_count = (
+            db.query(Question)
+            .filter(Question.session_id == session.id)
+            .count()
         )
-        db.add(q)
 
-        last_q_active = active_seconds
-        last_q_raw = raw_seconds
-
-        # NEXT → move to next question
-        if event.type == "NEXT":
-            session.current_question_index += 1
+        # Special case: first NEXT of a brand-new session
+        # → just start timing Q1, do NOT create a 0-second question row.
+        if event.type == "NEXT" and question_count == 0:
             session.current_question_started_at = ts
             session.pause_accumulated_seconds = 0.0
             session.is_paused = False
             session.pause_started_at = None
 
-        # EXIT → end session
-        if event.type == "EXIT":
-            session.is_active = False
-            session.ended_at = ts
-            session.current_question_started_at = None
-            session.pause_accumulated_seconds = 0.0
-            session.is_paused = False
-            session.pause_started_at = None
+        else:
+            # Close any active pause interval
+            if session.is_paused and session.pause_started_at is not None:
+                delta = (ts - session.pause_started_at).total_seconds()
+                if delta > 0:
+                    session.pause_accumulated_seconds += delta
+                session.is_paused = False
+                session.pause_started_at = None
+
+            if session.current_question_started_at is None:
+                session.current_question_started_at = session.started_at or ts
+
+            raw_seconds = (ts - session.current_question_started_at).total_seconds()
+            if raw_seconds < 0:
+                raw_seconds = 0.0
+
+            active_seconds = raw_seconds - (session.pause_accumulated_seconds or 0.0)
+            if active_seconds < 0:
+                active_seconds = 0.0
+
+            q = Question(
+                session_id=session.id,
+                index=session.current_question_index,
+                started_at=session.current_question_started_at,
+                ended_at=ts,
+                raw_seconds=raw_seconds,
+                active_seconds=active_seconds,
+            )
+            db.add(q)
+
+            last_q_active = active_seconds
+            last_q_raw = raw_seconds
+
+            if event.type == "NEXT":
+                session.current_question_index += 1
+                session.current_question_started_at = ts
+                session.pause_accumulated_seconds = 0.0
+                session.is_paused = False
+                session.pause_started_at = None
+
+            if event.type == "EXIT":
+                session.is_active = False
+                session.ended_at = ts
+                session.current_question_started_at = None
+                session.pause_accumulated_seconds = 0.0
+                session.is_paused = False
+                session.pause_started_at = None
+
 
     # Persist all changes
     db.commit()
