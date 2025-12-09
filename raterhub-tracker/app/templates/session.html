@@ -241,6 +241,26 @@
             border-radius: inherit;
             background: linear-gradient(90deg, #a66bff, #ff6ec7);
         }
+
+        /* New: delete button for question rows */
+        .row-actions {
+            text-align: center;
+            width: 36px;
+        }
+
+        .question-delete-btn {
+            border: none;
+            background: none;
+            color: #b00020;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            padding: 0;
+        }
+
+        .question-delete-btn:hover {
+            color: #ff1744;
+        }
     </style>
 </head>
 <body>
@@ -336,6 +356,7 @@
                     <th>Ended</th>
                     <th>Active time</th>
                     <th>Δ vs target</th>
+                    <th style="width: 32px;"></th>
                 </tr>
             </thead>
             <tbody>
@@ -354,6 +375,17 @@
                             {% else %}
                                 <span class="on-target">≈ on target</span>
                             {% endif %}
+                        </td>
+                        <td class="row-actions">
+                            <form method="post"
+                                  action="/dashboard/sessions/{{ summary.session_id }}/questions/{{ q.index }}/delete"
+                                  onsubmit="return confirm('Delete this question from the session? This cannot be undone.');">
+                                <button type="submit"
+                                        class="question-delete-btn"
+                                        title="Delete question">
+                                    ✕
+                                </button>
+                            </form>
                         </td>
                     </tr>
                 {% endfor %}

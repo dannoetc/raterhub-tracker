@@ -155,6 +155,26 @@
             margin-bottom: 4px;
         }
 
+        .session-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .session-delete-btn {
+            border: none;
+            background: none;
+            color: #b00020;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 0 4px;
+        }
+
+        .session-delete-btn:hover {
+            color: #ff1744;
+        }
+
         .session-title {
             font-size: 14px;
             font-weight: 600;
@@ -268,31 +288,31 @@
         </p>
     </header>
 
-<form method="get" action="/dashboard/today" style="margin: 8px 0 18px 0;">
-    <label style="font-size: 13px; color: #7a748f; margin-right: 8px;">
-        View date:
-        <input
-            type="date"
-            name="date"
-            value="{{ selected_date if selected_date else (summary.date.strftime('%Y-%m-%d') if summary.date else '') }}"
-            style="padding: 4px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px;"
+    <form method="get" action="/dashboard/today" style="margin: 8px 0 18px 0;">
+        <label style="font-size: 13px; color: #7a748f; margin-right: 8px;">
+            View date:
+            <input
+                type="date"
+                name="date"
+                value="{{ selected_date if selected_date else (summary.date.strftime('%Y-%m-%d') if summary.date else '') }}"
+                style="padding: 4px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px;"
+            >
+        </label>
+        <button
+            type="submit"
+            style="
+                padding: 5px 10px;
+                border-radius: 999px;
+                border: none;
+                background: #6c5ce7;
+                color: #fff;
+                font-size: 13px;
+                cursor: pointer;
+            "
         >
-    </label>
-    <button
-        type="submit"
-        style="
-            padding: 5px 10px;
-            border-radius: 999px;
-            border: none;
-            background: #6c5ce7;
-            color: #fff;
-            font-size: 13px;
-            cursor: pointer;
-        "
-    >
-        Go
-    </button>
-</form>
+            Go
+        </button>
+    </form>
 
     <!-- Top summary cards -->
     <div class="summary-grid">
@@ -309,10 +329,10 @@
             <div class="summary-value">{{ summary.total_questions or 0 }}</div>
             <div class="summary-extra">
                 Across all sessions
-            <div class="sparkline-bar">
-               {% set q = summary.total_questions or 0 %}
-            <div class="sparkline-fill" style="width: {{ (q if q < 40 else 40) * 2.5 }}%;"></div>
-</div>
+                <div class="sparkline-bar">
+                    {% set q = summary.total_questions or 0 %}
+                    <div class="sparkline-fill" style="width: {{ (q if q < 40 else 40) * 2.5 }}%;"></div>
+                </div>
             </div>
         </div>
 
@@ -343,8 +363,20 @@
                         <div class="session-title">
                             Session {{ loop.index }}
                         </div>
-                        <div class="session-status {{ 'active' if s.is_active else 'ended' }}">
-                            {{ "ACTIVE" if s.is_active else "ENDED" }}
+                        <div class="session-actions">
+                            <div class="session-status {{ 'active' if s.is_active else 'ended' }}">
+                                {{ "ACTIVE" if s.is_active else "ENDED" }}
+                            </div>
+                            <form method="post"
+                                  action="/dashboard/sessions/{{ s.session_id }}/delete"
+                                  style="display:inline"
+                                  onsubmit="return confirm('Delete this entire session and all questions? This cannot be undone.');">
+                                <button type="submit"
+                                        class="session-delete-btn"
+                                        title="Delete session">
+                                    ✕
+                                </button>
+                            </form>
                         </div>
                     </div>
 

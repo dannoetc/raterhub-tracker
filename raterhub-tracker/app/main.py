@@ -10,9 +10,10 @@ from fastapi import (
     Form,
     Cookie,
     Query,
+    status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -83,15 +84,6 @@ def get_db():
 # ============================================================
 # Utility helpers
 # ============================================================
-
-def format_mmss(seconds: float) -> str:
-    if seconds is None:
-        return ""
-    if seconds < 0:
-        seconds = 0
-    minutes = int(seconds // 60)
-    secs = int(round(seconds - minutes * 60))
-    return f"{minutes:02d}:{secs:02d}"
 
 def format_mmss(seconds: float) -> str:
     if seconds is None:
@@ -653,7 +645,11 @@ def post_event(
 # Session summary (single session) – ignores ghost rows
 # ============================================================
 
-def build_session_summary(db: OrmSession, user: User, session_public_id: str) -> SessionSummary:
+def build_session_summary(
+    db: OrmSession,
+    user: User,
+    session_public_id: str
+) -> SessionSummary:
     session = (
         db.query(DbSession)
         .filter(DbSession.public_id == session_public_id, DbSession.user_id == user.id)
@@ -704,12 +700,12 @@ def build_session_summary(db: OrmSession, user: User, session_public_id: str) ->
     question_summaries: List[SessionQuestionSummary] = []
     target_seconds = (session.target_minutes_per_question or 5.5) * 60
 
-    # Renumber indexes for display so you still see 1,2,3,... even if Q1 was ghosted
     display_index = 1
     for q in questions:
         over_under = q.active_seconds - target_seconds
         question_summaries.append(
             SessionQuestionSummary(
+                id=q.id,
                 index=display_index,
                 started_at=q.started_at,
                 ended_at=q.ended_at,
@@ -778,7 +774,9 @@ def build_day_summary(
     tz = get_user_tz(user)
 
     # target_date is interpreted in user's local TZ
-    local_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=tz)
+    local_start = datetime(
+        target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=tz
+    )
     local_end = local_start + timedelta(days=1)
 
     # Convert local bounds to UTC naive for DB queries
@@ -893,7 +891,9 @@ def get_day_sessions(
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+            raise HTTPException(
+                status_code=400, detail="Invalid date format, use YYYY-MM-DD"
+            )
     else:
         # 'today' in user's local timezone
         tz = get_user_tz(current_user)
@@ -917,7 +917,9 @@ def dashboard_today(
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+            raise HTTPException(
+                status_code=400, detail="Invalid date format, use YYYY-MM-DD"
+            )
     else:
         tz = get_user_tz(current_user)
         now_local = datetime.now(tz)
@@ -934,6 +936,178 @@ def dashboard_today(
             "selected_date": selected_date_str,
             "user_timezone": getattr(current_user, "timezone", None),
         },
+    )
+
+# ============================================================
+# Session / question delete (API & HTML)
+# ============================================================
+
+@app.delete("/sessions/{session_public_id}")
+def delete_session_api(
+    session_public_id: str,
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    Hard-delete a session and all its events/questions (API).
+    """
+    session = (
+        db.query(DbSession)
+        .filter(
+            DbSession.public_id == session_public_id,
+            DbSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    db.delete(session)  # cascades to events/questions
+    db.commit()
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"status": "ok", "message": "Session deleted."},
+    )
+
+
+@app.post("/dashboard/sessions/{session_public_id}/delete")
+def delete_session_web(
+    session_public_id: str,
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    HTML form path to delete a session from the dashboard.
+    """
+    session = (
+        db.query(DbSession)
+        .filter(
+            DbSession.public_id == session_public_id,
+            DbSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    db.delete(session)
+    db.commit()
+
+    return RedirectResponse(url="/dashboard/today", status_code=303)
+
+
+@app.delete("/sessions/{session_public_id}/questions/{question_id}")
+def delete_question_api(
+    session_public_id: str,
+    question_id: int,
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    Hard-delete a single question inside a session (API).
+    """
+    session = (
+        db.query(DbSession)
+        .filter(
+            DbSession.public_id == session_public_id,
+            DbSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    question = (
+        db.query(Question)
+        .filter(
+            Question.id == question_id,
+            Question.session_id == session.id,
+        )
+        .first()
+    )
+
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    db.delete(question)
+    db.commit()
+
+    # Optionally renumber remaining questions
+    remaining = (
+        db.query(Question)
+        .filter(Question.session_id == session.id)
+        .order_by(Question.started_at.asc())
+        .all()
+    )
+    idx = 1
+    for row in remaining:
+        row.index = idx
+        idx += 1
+    db.commit()
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"status": "ok", "message": "Question deleted."},
+    )
+
+
+@app.post("/dashboard/sessions/{session_public_id}/questions/{question_id}/delete")
+def delete_question_web(
+    session_public_id: str,
+    question_id: int,
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """
+    HTML form path to delete a single question row from the session detail page.
+    """
+    session = (
+        db.query(DbSession)
+        .filter(
+            DbSession.public_id == session_public_id,
+            DbSession.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    question = (
+        db.query(Question)
+        .filter(
+            Question.id == question_id,
+            Question.session_id == session.id,
+        )
+        .first()
+    )
+
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    db.delete(question)
+    db.commit()
+
+    # Renumber remaining questions so indexes stay 1..N
+    remaining = (
+        db.query(Question)
+        .filter(Question.session_id == session.id)
+        .order_by(Question.started_at.asc())
+        .all()
+    )
+    idx = 1
+    for row in remaining:
+        row.index = idx
+        idx += 1
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/dashboard/sessions/{session_public_id}",
+        status_code=303,
     )
 
 # ============================================================
