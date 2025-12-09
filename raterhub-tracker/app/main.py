@@ -93,6 +93,39 @@ def format_mmss(seconds: float) -> str:
     secs = int(round(seconds - minutes * 60))
     return f"{minutes:02d}:{secs:02d}"
 
+def format_mmss(seconds: float) -> str:
+    if seconds is None:
+        return ""
+    if seconds < 0:
+        seconds = 0
+    minutes = int(seconds // 60)
+    secs = int(round(seconds - minutes * 60))
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def format_hhmm_or_mmss_for_dashboard(seconds: float) -> str:
+    """
+    For dashboard totals/averages:
+    - Under 60 minutes => MM:SS
+    - 60 minutes or more => HH:MM (no seconds, like a workday timer)
+    """
+    if seconds is None:
+        return ""
+    if seconds < 0:
+        seconds = 0
+
+    total_minutes = int(seconds // 60)
+    secs = int(round(seconds - total_minutes * 60))
+
+    if total_minutes < 60:
+        # show MM:SS
+        return f"{total_minutes:02d}:{secs:02d}"
+    else:
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+        # show HH:MM
+        return f"{hours:02d}:{minutes:02d}"
+
 
 def compute_pace(avg_seconds: float, target_minutes: float):
     """
@@ -829,7 +862,7 @@ def build_day_summary(
                 total_questions=count,
                 total_active_seconds=total_active,
                 avg_active_seconds=avg_active,
-                avg_active_mmss=format_mmss(avg_active),
+                avg_active_mmss=format_hhmm_or_mmss_for_dashboard(avg_active),
                 pace_label=pace["pace_label"],
                 pace_emoji=pace["pace_emoji"],
                 score=pace["score"],
@@ -842,7 +875,7 @@ def build_day_summary(
         total_sessions=total_sessions,
         total_questions=total_questions_all,
         total_active_seconds=total_active_all,
-        total_active_mmss=format_mmss(total_active_all),
+        total_active_mmss=format_hhmm_or_mmss_for_dashboard(total_active_all),
         sessions=items,
     )
 
