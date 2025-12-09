@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
+from zoneinfo import ZoneInfo
 
 from fastapi import (
     FastAPI,
@@ -134,7 +135,7 @@ def compute_pace(avg_seconds: float, target_minutes: float):
 
 def is_ghost_question(q: Question) -> bool:
     """
-    Ghost questions = the zero-length placeholders we want to hide from reports:
+    Ghost questions = the zero-length placeholders we want to hide from reports due to utter laziness:
     - index == 1
     - raw_seconds == 0
     - active_seconds == 0
@@ -146,6 +147,27 @@ def is_ghost_question(q: Question) -> bool:
         and (q.active_seconds or 0.0) == 0.0
         and q.started_at == q.ended_at
     )
+
+
+def get_user_tz(user: User) -> ZoneInfo:
+    tzname = user.timezone or "UTC"
+    try:
+        return ZoneInfo(tzname)
+    except Exception:
+        return ZoneInfo("UTC")
+
+
+def to_user_local(dt: Optional[datetime], user: User) -> Optional[datetime]:
+    if dt is None:
+        return None
+    tz = get_user_tz(user)
+    # DB timestamps are naive UTC
+    if dt.tzinfo is None:
+        dt_utc = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt_utc = dt.astimezone(timezone.utc)
+    return dt_utc.astimezone(tz)
+
 
 # ============================================================
 # Auth: current user via header or cookie
@@ -712,20 +734,27 @@ def dashboard_session(
 def build_day_summary(
     db: OrmSession,
     user: User,
-    target_date: datetime,
+    target_date: datetime,  # we’ll still pass a datetime, but only Y-M-D matters
 ) -> TodaySummary:
     """
-    Build a summary for a given calendar date (UTC).
+    Build a summary for a given calendar date in the user's timezone.
     """
-    day_start = datetime(target_date.year, target_date.month, target_date.day)
-    day_end = day_start + timedelta(days=1)
+    tz = get_user_tz(user)
+
+    # target_date is interpreted in user's local TZ
+    local_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=tz)
+    local_end = local_start + timedelta(days=1)
+
+    # Convert local bounds to UTC naive for DB queries
+    utc_start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
+    utc_end = local_end.astimezone(timezone.utc).replace(tzinfo=None)
 
     sessions = (
         db.query(DbSession)
         .filter(
             DbSession.user_id == user.id,
-            DbSession.started_at >= day_start,
-            DbSession.started_at < day_end,
+            DbSession.started_at >= utc_start,
+            DbSession.started_at < utc_end,
         )
         .order_by(DbSession.started_at.asc())
         .all()
@@ -733,7 +762,7 @@ def build_day_summary(
 
     if not sessions:
         return TodaySummary(
-            date=day_start,
+            date=local_start,  # report date as local midnight
             user_external_id=user.email,
             total_sessions=0,
             total_questions=0,
@@ -748,22 +777,19 @@ def build_day_summary(
     items: List[TodaySessionItem] = []
 
     for s in sessions:
-        all_questions = (
+        qs = (
             db.query(Question)
             .filter(Question.session_id == s.id)
             .order_by(Question.index.asc())
             .all()
         )
 
-        # Filter out ghost entries
-        qs = [q for q in all_questions if not is_ghost_question(q)]
-
         if not qs:
             items.append(
                 TodaySessionItem(
                     session_id=s.public_id,
-                    started_at=s.started_at,
-                    ended_at=s.ended_at,
+                    started_at=to_user_local(s.started_at, user),
+                    ended_at=to_user_local(s.ended_at, user),
                     is_active=s.is_active,
                     total_questions=0,
                     total_active_seconds=0.0,
@@ -791,8 +817,8 @@ def build_day_summary(
         items.append(
             TodaySessionItem(
                 session_id=s.public_id,
-                started_at=s.started_at,
-                ended_at=s.ended_at,
+                started_at=to_user_local(s.started_at, user),
+                ended_at=to_user_local(s.ended_at, user),
                 is_active=s.is_active,
                 total_questions=count,
                 total_active_seconds=total_active,
@@ -805,7 +831,7 @@ def build_day_summary(
         )
 
     return TodaySummary(
-        date=day_start,
+        date=local_start,  # stored as local midnight in user's TZ
         user_external_id=user.email,
         total_sessions=total_sessions,
         total_questions=total_questions_all,
@@ -819,7 +845,7 @@ def build_day_summary(
 def get_day_sessions(
     date: Optional[str] = Query(
         default=None,
-        description="Optional date in YYYY-MM-DD (UTC). If omitted, uses today.",
+        description="Optional date in YYYY-MM-DD (user's local timezone). If omitted, uses today.",
     ),
     current_user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
@@ -830,8 +856,10 @@ def get_day_sessions(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
     else:
-        now = datetime.utcnow()
-        target_date = datetime(now.year, now.month, now.day)
+        # 'today' in user's local timezone
+        tz = get_user_tz(current_user)
+        now_local = datetime.now(tz)
+        target_date = datetime(now_local.year, now_local.month, now_local.day)
 
     return build_day_summary(db, current_user, target_date)
 
@@ -841,7 +869,7 @@ def dashboard_today(
     request: Request,
     date: Optional[str] = Query(
         default=None,
-        description="Optional date in YYYY-MM-DD (UTC). If omitted, uses today.",
+        description="Optional date in YYYY-MM-DD (user's local timezone). If omitted, uses today.",
     ),
     current_user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
@@ -852,8 +880,9 @@ def dashboard_today(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
     else:
-        now = datetime.utcnow()
-        target_date = datetime(now.year, now.month, now.day)
+        tz = get_user_tz(current_user)
+        now_local = datetime.now(tz)
+        target_date = datetime(now_local.year, now_local.month, now_local.day)
 
     summary = build_day_summary(db, current_user, target_date)
     selected_date_str = summary.date.strftime("%Y-%m-%d") if summary.date else ""
@@ -864,6 +893,7 @@ def dashboard_today(
             "request": request,
             "summary": summary,
             "selected_date": selected_date_str,
+            "user_timezone": current_user.timezone,
         },
     )
 
@@ -950,5 +980,46 @@ def admin_dashboard(
             "request": request,
             "sessions": sessions,
             "user": current_user,
+        },
+    )
+
+@app.get("/profile", response_class=HTMLResponse)
+def profile_form(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    return templates.TemplateResponse(
+        "profile.html",
+        {
+            "request": request,
+            "user": current_user,
+        },
+    )
+
+
+@app.post("/profile", response_class=HTMLResponse)
+def profile_update(
+    request: Request,
+    timezone_name: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    # Basic validation: must be a valid IANA timezone or fall back to UTC
+    try:
+        _ = ZoneInfo(timezone_name)
+        valid_tz = timezone_name
+    except Exception:
+        valid_tz = "UTC"
+
+    current_user.timezone = valid_tz
+    db.commit()
+    db.refresh(current_user)
+
+    return templates.TemplateResponse(
+        "profile.html",
+        {
+            "request": request,
+            "user": current_user,
+            "message": "Profile updated.",
         },
     )

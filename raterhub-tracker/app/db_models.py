@@ -20,24 +20,18 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    external_id = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
-
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    external_id = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False)
     last_login_at = Column(DateTime, nullable=True)
-
-    # Auth-related fields
     password_hash = Column(String, nullable=True)
-    auth_provider = Column(String, nullable=False, default="local")
+    auth_provider = Column(String, nullable=False)
     google_sub = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
 
-    # Relationships
-    sessions = relationship(
-        "Session",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
+    # NEW: user timezone (IANA name like "America/Denver")
+    timezone = Column(String, nullable=False, default="UTC")
+
 
 
 class Session(Base):
