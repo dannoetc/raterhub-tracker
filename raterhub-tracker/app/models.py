@@ -15,16 +15,6 @@ class EventIn(BaseModel):
         description="Client-side timestamp (ISO 8601). Server will also record its own."
     )
     
-class UserBase(BaseModel):
-    email: EmailStr
-    timezone: Optional[str] = "UTC"
-
-class UserCreate(UserBase):
-    password: str
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
 
 class EventOut(BaseModel):
     """Basic response confirming event was processed."""
