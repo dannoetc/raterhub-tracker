@@ -46,7 +46,7 @@ from .auth import (
 app = FastAPI(
     title="RaterHub Tracker API",
     description="Backend for timing and scoring RaterHub rating sessions.",
-    version="0.5.1",
+    version="0.5.2",
 )
 
 Base.metadata.create_all(bind=engine)
@@ -135,7 +135,7 @@ def compute_pace(avg_seconds: float, target_minutes: float):
 
 def is_ghost_question(q: Question) -> bool:
     """
-    Ghost questions = the zero-length placeholders we want to hide from reports due to utter laziness:
+    Ghost questions = the zero-length placeholders we want to hide from reports:
     - index == 1
     - raw_seconds == 0
     - active_seconds == 0
@@ -150,7 +150,11 @@ def is_ghost_question(q: Question) -> bool:
 
 
 def get_user_tz(user: User) -> ZoneInfo:
-    tzname = user.timezone or "UTC"
+    """
+    Return the user's configured timezone (IANA name) or UTC.
+    Assumes User has a .timezone string column.
+    """
+    tzname = getattr(user, "timezone", None) or "UTC"
     try:
         return ZoneInfo(tzname)
     except Exception:
@@ -167,7 +171,6 @@ def to_user_local(dt: Optional[datetime], user: User) -> Optional[datetime]:
     else:
         dt_utc = dt.astimezone(timezone.utc)
     return dt_utc.astimezone(tz)
-
 
 # ============================================================
 # Auth: current user via header or cookie
@@ -407,6 +410,7 @@ def me(current_user: User = Depends(get_current_user)):
         "created_at": current_user.created_at,
         "last_login_at": current_user.last_login_at,
         "is_active": current_user.is_active,
+        "timezone": getattr(current_user, "timezone", None),
     }
 
 
@@ -442,7 +446,6 @@ def recent_sessions(
 
 # ============================================================
 # Event ingestion (/events) – NEXT / PAUSE / EXIT / UNDO
-# (unchanged from your known-good version)
 # ============================================================
 
 @app.post("/events", response_model=EventOut)
@@ -614,7 +617,7 @@ def post_event(
     )
 
 # ============================================================
-# Session summary (single session) – now ignores ghost rows
+# Session summary (single session) – ignores ghost rows
 # ============================================================
 
 def build_session_summary(db: OrmSession, user: User, session_public_id: str) -> SessionSummary:
@@ -728,13 +731,13 @@ def dashboard_session(
     )
 
 # ============================================================
-# Day summary (today or any date) – now ignores ghost rows
+# Day summary (today or any date) – ignores ghost rows + user TZ
 # ============================================================
 
 def build_day_summary(
     db: OrmSession,
     user: User,
-    target_date: datetime,  # we’ll still pass a datetime, but only Y-M-D matters
+    target_date: datetime,  # only Y-M-D used; interpreted in user's TZ
 ) -> TodaySummary:
     """
     Build a summary for a given calendar date in the user's timezone.
@@ -777,12 +780,15 @@ def build_day_summary(
     items: List[TodaySessionItem] = []
 
     for s in sessions:
-        qs = (
+        qs_all = (
             db.query(Question)
             .filter(Question.session_id == s.id)
             .order_by(Question.index.asc())
             .all()
         )
+
+        # Filter ghost questions
+        qs = [q for q in qs_all if not is_ghost_question(q)]
 
         if not qs:
             items.append(
@@ -893,7 +899,7 @@ def dashboard_today(
             "request": request,
             "summary": summary,
             "selected_date": selected_date_str,
-            "user_timezone": current_user.timezone,
+            "user_timezone": getattr(current_user, "timezone", None),
         },
     )
 
@@ -982,6 +988,10 @@ def admin_dashboard(
             "user": current_user,
         },
     )
+
+# ============================================================
+# Profile (timezone, etc.)
+# ============================================================
 
 @app.get("/profile", response_class=HTMLResponse)
 def profile_form(

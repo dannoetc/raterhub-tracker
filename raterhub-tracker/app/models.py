@@ -4,12 +4,12 @@ from typing import Optional, Literal
 
 from pydantic import BaseModel, Field, EmailStr
 
-EventType = Literal["NEXT", "PAUSE", "EXIT"]
+EventType = Literal["NEXT", "PAUSE", "EXIT", "UNDO"]
 
 
 class EventIn(BaseModel):
     """Event sent from the browser JS / client."""
-    type: EventType = Field(..., description="Event type: NEXT, PAUSE, or EXIT")
+    type: EventType = Field(..., description="Event type: NEXT, PAUSE, UNDO or EXIT")
     timestamp: datetime = Field(
         default_factory=datetime.utcnow,
         description="Client-side timestamp (ISO 8601). Server will also record its own."
