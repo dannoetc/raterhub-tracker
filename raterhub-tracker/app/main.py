@@ -263,6 +263,7 @@ def root(
 # Auth endpoints (API-style)
 # ============================================================
 
+@limiter.limit("3/minute")
 @app.post("/auth/register", response_model=Token)
 def register_api(user_in: UserCreate, db: OrmSession = Depends(get_db)):
     exists = db.query(User).filter(User.email == user_in.email).first()
@@ -286,7 +287,7 @@ def register_api(user_in: UserCreate, db: OrmSession = Depends(get_db)):
     token = create_access_token(user=user)
     return Token(access_token=token)
 
-
+@limiter.limit("5/minute")
 @app.post("/auth/login", response_model=Token)
 def login_api(user_in: UserLogin, db: OrmSession = Depends(get_db)):
     user = db.query(User).filter(User.email == user_in.email).first()
@@ -478,6 +479,9 @@ def recent_sessions(
 # Event ingestion (/events) – NEXT / PAUSE / EXIT / UNDO
 # ============================================================
 
+# Probably enough events in a minute. Maybe. 
+
+@limiter.limit("15/minute")
 @app.post("/events", response_model=EventOut)
 def post_event(
     event: EventIn,
