@@ -485,6 +485,10 @@ def post_event(
     - Events table
     - Questions table (for NEXT/EXIT)
     - Session state (UNDO rolls back last question)
+
+    IMPORTANT:
+    - Only NEXT is allowed to *start* a new session.
+    - PAUSE / EXIT / UNDO require an existing active session.
     """
     now = datetime.utcnow()
     ts = event.timestamp
@@ -501,7 +505,7 @@ def post_event(
     user.last_login_at = now
     db.commit()
 
-    # Find or create active session for this user
+    # Find active session for this user (if any)
     session = (
         db.query(DbSession)
         .filter(DbSession.user_id == user.id, DbSession.is_active == True)
@@ -509,7 +513,17 @@ def post_event(
         .first()
     )
 
+    # 🔒 NEW BEHAVIOR: Only NEXT can start a session
     if session is None:
+        if event.type != "NEXT":
+            # No active session and event is PAUSE/EXIT/UNDO → reject
+            raise HTTPException(
+                status_code=400,
+                detail="No active session. Press NEXT to start a session before sending "
+                       f"{event.type} events.",
+            )
+
+        # Create a new session for FIRST NEXT
         session = DbSession(
             user_id=user.id,
             started_at=ts,
@@ -525,6 +539,7 @@ def post_event(
         db.commit()
         db.refresh(session)
 
+    # At this point we are guaranteed to have a session
     # Record the event itself
     db.add(Event(session_id=session.id, type=event.type, timestamp=ts))
 

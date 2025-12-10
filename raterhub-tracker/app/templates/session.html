@@ -343,55 +343,55 @@
         {{ "%.1f" % (summary.target_minutes_per_question or 5.5) }} minute target.
     </p>
 
-    {% if not summary.questions %}
-        <div class="empty-state">
-            No questions recorded for this session yet.
-        </div>
-    {% else %}
-        <table>
-            <thead>
+{% if not summary.questions %}
+    <div class="empty-state">
+        No questions recorded for this session yet.
+    </div>
+{% else %}
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Started</th>
+                <th>Ended</th>
+                <th>Active time</th>
+                <th>Δ vs target</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for q in summary.questions %}
+                {% set delta = q.over_under_target_seconds or 0 %}
                 <tr>
-                    <th>#</th>
-                    <th>Started</th>
-                    <th>Ended</th>
-                    <th>Active time</th>
-                    <th>Δ vs target</th>
-                    <th style="width: 32px;"></th>
+                    <td class="q-index">{{ q.index }}</td>
+                    <td>{{ q.started_at }}</td>
+                    <td>{{ q.ended_at }}</td>
+                    <td class="q-time">{{ q.active_mmss }}</td>
+                    <td class="over-under">
+                        {% if delta > 5 %}
+                            <span class="over">+{{ q.over_under_target_mmss }}</span>
+                        {% elif delta < -5 %}
+                            <span class="under">-{{ q.over_under_target_mmss }}</span>
+                        {% else %}
+                            <span class="on-target">≈ on target</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post"
+                              action="/dashboard/sessions/{{ summary.session_id }}/questions/{{ q.id }}/delete"
+                              style="display:inline;">
+                            <button type="submit"
+                                    onclick="return confirm('Delete this question from the session?');"
+                                    title="Delete this question">
+                                ✕
+                            </button>
+                        </form>
+                    </td>
                 </tr>
-            </thead>
-            <tbody>
-                {% for q in summary.questions %}
-                    {% set delta = q.over_under_target_seconds or 0 %}
-                    <tr>
-                        <td class="q-index">{{ q.index }}</td>
-                        <td>{{ q.started_at }}</td>
-                        <td>{{ q.ended_at }}</td>
-                        <td class="q-time">{{ q.active_mmss }}</td>
-                        <td class="over-under">
-                            {% if delta > 5 %}
-                                <span class="over">+{{ q.over_under_target_mmss }}</span>
-                            {% elif delta < -5 %}
-                                <span class="under">-{{ q.over_under_target_mmss }}</span>
-                            {% else %}
-                                <span class="on-target">≈ on target</span>
-                            {% endif %}
-                        </td>
-                        <td class="row-actions">
-                            <form method="post"
-                                  action="/dashboard/sessions/{{ summary.session_id }}/questions/{{ q.index }}/delete"
-                                  onsubmit="return confirm('Delete this question from the session? This cannot be undone.');">
-                                <button type="submit"
-                                        class="question-delete-btn"
-                                        title="Delete question">
-                                    ✕
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
 </div>
 </body>
 </html>
