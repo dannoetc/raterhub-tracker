@@ -19,6 +19,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from sqlalchemy.orm import Session as OrmSession
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 from .database import SessionLocal, engine
 from .db_models import Base, User, Session as DbSession, Event, Question
 from .models import (
@@ -39,34 +43,35 @@ from .auth import (
     create_access_token,
     decode_access_token,
 )
+from .config import settings
 
 # ============================================================
 # FastAPI initialization
 # ============================================================
 
 app = FastAPI(
-    title="RaterHub Tracker API",
+    title=settings.PROJECT_NAME,
     description="Backend for timing and scoring RaterHub rating sessions.",
-    version="0.5.2",
+    version=settings.VERSION,
 )
 
 Base.metadata.create_all(bind=engine)
 
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=settings.TEMPLATES_DIR)
 
 # CORS – allow your UI/API and RaterHub origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://raterhub.steigenga.com",
-        "https://api.raterhub.steigenga.com",
-        "https://raterhub.com",
-        "https://www.raterhub.com",
-    ],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiter (per client IP)
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 security = HTTPBearer(auto_error=False)  # allow missing header, fallback to cookie
 
@@ -258,6 +263,7 @@ def root(
 # Auth endpoints (API-style)
 # ============================================================
 
+@limiter.limit("3/minute")
 @app.post("/auth/register", response_model=Token)
 def register_api(user_in: UserCreate, db: OrmSession = Depends(get_db)):
     exists = db.query(User).filter(User.email == user_in.email).first()
@@ -281,7 +287,7 @@ def register_api(user_in: UserCreate, db: OrmSession = Depends(get_db)):
     token = create_access_token(user=user)
     return Token(access_token=token)
 
-
+@limiter.limit("5/minute")
 @app.post("/auth/login", response_model=Token)
 def login_api(user_in: UserLogin, db: OrmSession = Depends(get_db)):
     user = db.query(User).filter(User.email == user_in.email).first()
@@ -473,6 +479,9 @@ def recent_sessions(
 # Event ingestion (/events) – NEXT / PAUSE / EXIT / UNDO
 # ============================================================
 
+# Probably enough events in a minute. Maybe. 
+
+@limiter.limit("15/minute")
 @app.post("/events", response_model=EventOut)
 def post_event(
     event: EventIn,
