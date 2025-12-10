@@ -89,7 +89,8 @@ ALLOWED_ORIGINS=https://raterhub.com,https://www.raterhub.com
 ## 📃 Documentation
 
 You can visit `/docs` when running locally to access the FastAPI auto-generated API docs.
-## TODO: Production Hardening & Cleanup
+
+## 📃 TODO: Production Hardening & Cleanup
 
 The following items remain before the application is considered production-ready and stable for self-hosting or open-source distribution:
 
