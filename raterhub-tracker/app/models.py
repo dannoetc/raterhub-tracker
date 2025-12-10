@@ -33,6 +33,7 @@ class EventOut(BaseModel):
 
 
 class SessionQuestionSummary(BaseModel):
+    id: int # New primary key used for deletion and other stuff... I'm new at this go away 
     index: int
     started_at: datetime
     ended_at: datetime
