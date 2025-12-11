@@ -7,9 +7,10 @@ from passlib.exc import UnknownHashError
 from .config import settings
 
 pwd_context = CryptContext(
-    # bcrypt_sha256 allows passwords over 72 bytes by hashing first, while bcrypt
-    # remains for verifying any existing hashes already stored.
-    schemes=["bcrypt_sha256", "bcrypt"],
+    # pbkdf2_sha256 avoids bcrypt backend quirks and 72-byte limits for new hashes
+    # while bcrypt/bcrypt_sha256 remain for verifying any existing hashes already
+    # stored in the database.
+    schemes=["pbkdf2_sha256", "bcrypt_sha256", "bcrypt"],
     deprecated="auto",
 )
 
