@@ -835,6 +835,7 @@ def build_day_summary(
     hourly_buckets: List[float] = [0.0 for _ in range(24)]
 
     if not sessions:
+        hourly_buckets = [0.0 for _ in range(24)]
         daily_pace = compute_pace(0.0, 0.0)
         return TodaySummary(
             date=local_start,  # report date as local midnight
@@ -849,9 +850,7 @@ def build_day_summary(
             daily_pace_emoji=daily_pace["pace_emoji"],
             daily_pace_score=daily_pace["score"],
             daily_pace_ratio=daily_pace["ratio"],
-            hourly_activity=[
-                HourlyActivity(hour=hour, active_seconds=0.0) for hour in range(24)
-            ],
+            hourly_active_seconds=hourly_buckets,
             sessions=[],
         )
 
@@ -859,6 +858,7 @@ def build_day_summary(
     total_questions_all = 0
     total_active_all = 0.0
     total_target_minutes_weighted = 0.0
+    hourly_active_seconds = [0.0 for _ in range(24)]
     items: List[TodaySessionItem] = []
 
     for s in sessions:
@@ -905,10 +905,9 @@ def build_day_summary(
         total_target_minutes_weighted += target_minutes * count
 
         for q in qs:
-            started_local = to_user_local(q.started_at, user)
-            if started_local is None:
-                continue
-            hourly_buckets[started_local.hour] += q.active_seconds or 0.0
+            q_local_start = to_user_local(q.started_at, user)
+            if q_local_start.date() == local_start.date():
+                hourly_active_seconds[q_local_start.hour] += q.active_seconds
 
         items.append(
             TodaySessionItem(
@@ -936,11 +935,6 @@ def build_day_summary(
     )
     daily_pace = compute_pace(avg_active_day, avg_target_minutes)
 
-    hourly_activity = [
-        HourlyActivity(hour=hour, active_seconds=seconds)
-        for hour, seconds in enumerate(hourly_buckets)
-    ]
-
     return TodaySummary(
         date=local_start,  # stored as local midnight in user's TZ
         user_external_id=user.email,
@@ -954,7 +948,7 @@ def build_day_summary(
         daily_pace_emoji=daily_pace["pace_emoji"],
         daily_pace_score=daily_pace["score"],
         daily_pace_ratio=daily_pace["ratio"],
-        hourly_activity=hourly_activity,
+        hourly_active_seconds=hourly_active_seconds,
         sessions=items,
     )
 

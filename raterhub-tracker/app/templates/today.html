@@ -119,45 +119,35 @@
             max-width: 100%;
         }
 
-        .hourly-activity-card {
-            background: var(--card-bg);
-            border-radius: 14px;
-            padding: 14px 16px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-            border: 1px solid var(--border-subtle);
-            margin-bottom: 22px;
+        .sparkline-grid {
+            display: grid;
+            grid-template-columns: repeat(24, 1fr);
+            gap: 2px;
+            align-items: end;
+            height: 52px;
+            margin-top: 8px;
         }
 
-        .hourly-bars {
-            display: flex;
-            align-items: flex-end;
-            gap: 6px;
-            height: 90px;
-            margin-top: 12px;
-        }
-
-        .hourly-bar {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .hourly-bar-fill {
+        .sparkline-col {
             width: 100%;
-            background: linear-gradient(180deg, #c2b5ff, #6c5ce7);
-            border-radius: 6px 6px 2px 2px;
+            background: linear-gradient(180deg, #6c5ce7, #a66bff);
+            border-radius: 3px 3px 0 0;
+            min-height: 4px;
+            opacity: 0.85;
         }
 
-        .hourly-label {
-            font-size: 10px;
-            color: var(--text-muted);
+        .sparkline-col.is-zero {
+            background: #e6ddff;
+            opacity: 0.6;
+            min-height: 3px;
         }
 
-        .hourly-value {
-            font-size: 10px;
+        .sparkline-axis {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
             color: var(--text-muted);
+            margin-top: 4px;
         }
 
         .section-title {
@@ -401,6 +391,33 @@
             </div>
             <div class="summary-extra">
                 Based on average time vs target
+            </div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-label">Hourly activity</div>
+            {% set hourly = summary.hourly_active_seconds or [] %}
+            {% set max_value = (hourly | max) if hourly else 0 %}
+            <div class="summary-value" aria-label="Sparkline of hourly active seconds">
+                <div class="sparkline-grid">
+                    {% for value in hourly %}
+                        {% set raw_height = (value / max_value * 100) if max_value > 0 else 0 %}
+                        {% set bar_height = raw_height if raw_height > 6 else (6 if value > 0 else 0) %}
+                        <div
+                            class="sparkline-col{% if value == 0 %} is-zero{% endif %}"
+                            style="height: {{ bar_height }}%;"
+                            title="{{ '%02d' % loop.index0 }}: {{ value|round(0) }}s active"
+                        ></div>
+                    {% endfor %}
+                </div>
+                <div class="sparkline-axis">
+                    <span>00h</span>
+                    <span>12h</span>
+                    <span>24h</span>
+                </div>
+            </div>
+            <div class="summary-extra">
+                Active seconds per local hour{% if user_timezone %} ({{ user_timezone }}){% endif %}
             </div>
         </div>
     </div>
