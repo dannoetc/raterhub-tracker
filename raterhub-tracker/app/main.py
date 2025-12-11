@@ -90,8 +90,17 @@ CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "x-csrf-token"
 
 
-def generate_csrf_token() -> str:
-    return secrets.token_urlsafe(32)
+def _csrf_signature(nonce: str, issued_at: int) -> str:
+    message = f"{nonce}:{issued_at}".encode()
+    return hmac.new(settings.SECRET_KEY.encode(), message, "sha256").hexdigest()
+
+
+def generate_csrf_token(now: Optional[datetime] = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    issued_at = int(now.timestamp())
+    nonce = secrets.token_urlsafe(32)
+    signature = _csrf_signature(nonce, issued_at)
+    return f"{nonce}:{issued_at}:{signature}"
 
 
 def set_csrf_cookie(response, token: str):
@@ -116,11 +125,37 @@ def render_template_with_csrf(template_name: str, request: Request, context: dic
     return response
 
 
-def validate_csrf(request: Request, provided_token: Optional[str]) -> bool:
-    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
-    if not cookie_token or not provided_token:
+def _is_valid_csrf_token_value(token: str, max_age_seconds: int = 60 * 60 * 24) -> bool:
+    parts = token.split(":")
+    if len(parts) != 3:
         return False
-    return hmac.compare_digest(cookie_token, provided_token)
+
+    nonce, issued_at_raw, signature = parts
+    try:
+        issued_at = int(issued_at_raw)
+    except ValueError:
+        return False
+
+    expected_signature = _csrf_signature(nonce, issued_at)
+    if not hmac.compare_digest(expected_signature, signature):
+        return False
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if issued_at < now_ts - max_age_seconds:
+        return False
+
+    return True
+
+
+def validate_csrf(request: Request, provided_token: Optional[str]) -> bool:
+    if not provided_token or not _is_valid_csrf_token_value(provided_token):
+        return False
+
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
+    if cookie_token and not hmac.compare_digest(cookie_token, provided_token):
+        return False
+
+    return True
 
 
 @app.get("/auth/csrf")

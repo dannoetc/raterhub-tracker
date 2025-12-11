@@ -165,6 +165,25 @@ async def test_api_login_rejects_invalid_csrf_token():
 
 
 @pytest.mark.anyio
+async def test_api_login_accepts_signed_token_without_cookie():
+    create_user()
+    issuing_client = JsonASGIClient(app)
+
+    status, _, csrf_body = await issuing_client.get_json("/auth/csrf")
+    assert status == 200
+    csrf_token = csrf_body["csrf_token"]
+
+    stateless_client = JsonASGIClient(app)
+    status, _, body = await stateless_client.post_json(
+        "/auth/login",
+        {"email": "user@example.com", "password": "hunter2"},
+        headers={CSRF_HEADER_NAME: csrf_token},
+    )
+    assert status == 200
+    assert "access_token" in body
+
+
+@pytest.mark.anyio
 async def test_csrf_cookie_allows_cross_site_requests():
     client = JsonASGIClient(app)
 
