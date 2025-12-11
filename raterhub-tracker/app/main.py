@@ -36,6 +36,7 @@ from .models import (
     UserCreate,
     UserLogin,
     Token,
+    HourlyActivity,
 )
 from .auth import (
     get_password_hash,
@@ -834,6 +835,8 @@ def build_day_summary(
     hourly_activity = [0 for _ in range(24)]
 
     if not sessions:
+        hourly_buckets = [0.0 for _ in range(24)]
+        daily_pace = compute_pace(0.0, 0.0)
         return TodaySummary(
             date=local_start,  # report date as local midnight
             user_external_id=user.email,
