@@ -923,8 +923,12 @@ def build_day_summary(
             if started_local is None:
                 continue
             bucket_hour = started_local.hour
-            hourly_activity_data[bucket_hour]["active_seconds"] += q.active_seconds or 0.0
-            hourly_activity_data[bucket_hour]["total_questions"] += 1
+            bucket = hourly_activity_data[bucket_hour]
+            if isinstance(bucket, HourlyActivity):
+                bucket = bucket.model_dump()
+                hourly_activity_data[bucket_hour] = bucket
+            bucket["active_seconds"] += q.active_seconds or 0.0
+            bucket["total_questions"] += 1
 
         items.append(
             TodaySessionItem(
