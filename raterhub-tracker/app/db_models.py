@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     Float,
     ForeignKey,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship, declarative_base
 
@@ -131,3 +132,16 @@ class PasswordHistory(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     user = relationship("User", back_populates="password_history")
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key_type = Column(String, nullable=False)  # "account" or "ip"
+    key_value = Column(String, nullable=False)
+    failure_count = Column(Integer, nullable=False, default=0)
+    last_failure_at = Column(DateTime, nullable=True)
+    locked_until = Column(DateTime, nullable=True)
+
+    __table_args__ = (UniqueConstraint("key_type", "key_value", name="uix_login_attempt_key"),)

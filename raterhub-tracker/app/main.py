@@ -33,6 +33,7 @@ from .db_models import (
     Event,
     Question,
     PasswordHistory,
+    LoginAttempt,
 )
 from .models import (
     EventIn,
@@ -88,6 +89,11 @@ security = HTTPBearer(auto_error=False)  # allow missing header, fallback to coo
 
 CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "x-csrf-token"
+
+LOGIN_FAILURE_THRESHOLD = 5
+LOCKOUT_DURATION = timedelta(minutes=15)
+BACKOFF_AFTER_FAILURES = 3
+BACKOFF_STEP_SECONDS = 30
 
 
 def _csrf_signature(nonce: str, issued_at: int) -> str:
@@ -175,6 +181,76 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _get_or_create_login_attempt(db: OrmSession, key_type: str, key_value: str) -> LoginAttempt:
+    attempt = (
+        db.query(LoginAttempt)
+        .filter(LoginAttempt.key_type == key_type, LoginAttempt.key_value == key_value)
+        .first()
+    )
+    if attempt is None:
+        attempt = LoginAttempt(key_type=key_type, key_value=key_value, failure_count=0)
+        db.add(attempt)
+        db.commit()
+        db.refresh(attempt)
+    return attempt
+
+
+def _get_login_attempts(db: OrmSession, email: str, ip_address: str) -> list[LoginAttempt]:
+    normalized_email = email.lower().strip()
+    return [
+        _get_or_create_login_attempt(db, "account", normalized_email),
+        _get_or_create_login_attempt(db, "ip", ip_address),
+    ]
+
+
+def _login_blocked_until(attempts: list[LoginAttempt], now: datetime) -> datetime | None:
+    blocked_until: datetime | None = None
+    for attempt in attempts:
+        if attempt.locked_until and attempt.locked_until > now:
+            blocked_until = max(blocked_until or attempt.locked_until, attempt.locked_until)
+            continue
+
+        if attempt.failure_count >= BACKOFF_AFTER_FAILURES and attempt.last_failure_at:
+            backoff_seconds = BACKOFF_STEP_SECONDS * (
+                attempt.failure_count - BACKOFF_AFTER_FAILURES + 1
+            )
+            cooldown_until = attempt.last_failure_at + timedelta(seconds=backoff_seconds)
+            if cooldown_until > now:
+                blocked_until = max(blocked_until or cooldown_until, cooldown_until)
+
+    return blocked_until
+
+
+def _record_login_failure(db: OrmSession, attempts: list[LoginAttempt], now: datetime):
+    for attempt in attempts:
+        attempt.failure_count += 1
+        attempt.last_failure_at = now
+        if attempt.failure_count >= LOGIN_FAILURE_THRESHOLD:
+            attempt.locked_until = now + LOCKOUT_DURATION
+        db.add(attempt)
+    db.commit()
+
+
+def _reset_login_attempts(db: OrmSession, attempts: list[LoginAttempt]):
+    any_changes = False
+    for attempt in attempts:
+        if attempt.failure_count or attempt.locked_until or attempt.last_failure_at:
+            attempt.failure_count = 0
+            attempt.locked_until = None
+            attempt.last_failure_at = None
+            db.add(attempt)
+            any_changes = True
+
+    if any_changes:
+        db.commit()
 
 # ============================================================
 # Utility helpers
@@ -395,14 +471,23 @@ def login_api(request: Request, user_in: UserLogin, db: OrmSession = Depends(get
     if not validate_csrf(request, request.headers.get(CSRF_HEADER_NAME)):
         raise HTTPException(status_code=400, detail="Invalid or missing CSRF token")
 
+    now = datetime.utcnow()
+    ip_address = _client_ip(request)
+    attempts = _get_login_attempts(db, user_in.email, ip_address)
+    blocked_until = _login_blocked_until(attempts, now)
+    if blocked_until:
+        raise HTTPException(
+            status_code=429, detail="Too many login attempts. Please try again later."
+        )
+
     user = db.query(User).filter(User.email == user_in.email).first()
-    if not user or not user.password_hash:
+    if not user or not user.password_hash or not verify_password(user_in.password, user.password_hash):
+        _record_login_failure(db, attempts, now)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not verify_password(user_in.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    _reset_login_attempts(db, attempts)
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = now
     db.commit()
 
     token = create_access_token(user=user)
@@ -434,8 +519,22 @@ def login_web(
         response.status_code = 400
         return response
 
+    now = datetime.utcnow()
+    ip_address = _client_ip(request)
+    attempts = _get_login_attempts(db, email, ip_address)
+    blocked_until = _login_blocked_until(attempts, now)
+    if blocked_until:
+        response = render_template_with_csrf(
+            "login.html",
+            request,
+            {"error": "Too many login attempts. Please try again later.", "email": email},
+        )
+        response.status_code = 429
+        return response
+
     user = db.query(User).filter(User.email == email).first()
     if not user or not user.password_hash or not verify_password(password, user.password_hash):
+        _record_login_failure(db, attempts, now)
         response = render_template_with_csrf(
             "login.html",
             request,
@@ -443,6 +542,8 @@ def login_web(
         )
         response.status_code = 400
         return response
+
+    _reset_login_attempts(db, attempts)
 
     token = create_access_token(user=user)
 
