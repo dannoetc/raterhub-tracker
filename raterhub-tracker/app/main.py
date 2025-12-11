@@ -36,6 +36,7 @@ from .models import (
     UserCreate,
     UserLogin,
     Token,
+    HourlyActivity,
 )
 from .auth import (
     get_password_hash,
@@ -830,6 +831,8 @@ def build_day_summary(
         .order_by(DbSession.started_at.asc())
         .all()
     )
+
+    hourly_buckets: List[float] = [0.0 for _ in range(24)]
 
     if not sessions:
         hourly_buckets = [0.0 for _ in range(24)]

@@ -85,6 +85,11 @@ class TodaySessionItem(BaseModel):
     score: int
 
 
+class HourlyActivity(BaseModel):
+    hour: int
+    active_seconds: float
+
+
 class TodaySummary(BaseModel):
     date: datetime
     user_external_id: str
@@ -102,6 +107,7 @@ class TodaySummary(BaseModel):
     daily_pace_ratio: float
     hourly_active_seconds: list[float]
 
+    hourly_activity: list[HourlyActivity]
     sessions: list[TodaySessionItem]
 
 class Token(BaseModel):
