@@ -94,6 +94,14 @@ class TodaySummary(BaseModel):
     total_active_seconds: float
     total_active_mmss: str
 
+    avg_active_seconds: float
+    avg_active_mmss: str
+    daily_pace_label: str
+    daily_pace_emoji: str
+
+    # Optional for backward compatibility with older templates/clients expecting this field.
+    hourly_activity: list = Field(default_factory=list)
+
     sessions: list[TodaySessionItem]
 
 class Token(BaseModel):
