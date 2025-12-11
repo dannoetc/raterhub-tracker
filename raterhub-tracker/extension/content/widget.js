@@ -1,6 +1,7 @@
 (() => {
   const POS_KEY = "raterhubTrackerPos_v2";
   const STATE_KEY = "raterhubTrackerState_v2";
+  const SIZE_KEY = "raterhubTrackerSize_v1";
 
   const MESSAGE_TYPES = {
     CONTROL_EVENT: "SEND_EVENT",
@@ -34,7 +35,8 @@
     lastEventEl,
     bodyContainer,
     toggleBtn,
-    sessionStatsEl;
+    sessionStatsEl,
+    resizeObserver;
 
   // --- Drag state ---
   let isDragging = false;
@@ -94,6 +96,29 @@
       await storageSet(STATE_KEY, state);
     } catch (e) {
       console.warn("[RaterHubTracker] Failed to save state:", e);
+    }
+  }
+
+  async function saveWidgetSize() {
+    if (!widget) return;
+    try {
+      const rect = widget.getBoundingClientRect();
+      await storageSet(SIZE_KEY, { width: rect.width, height: rect.height });
+    } catch (e) {
+      console.warn("[RaterHubTracker] Failed to save widget size:", e);
+    }
+  }
+
+  async function loadWidgetSize() {
+    if (!widget) return;
+    try {
+      const size = await storageGet(SIZE_KEY);
+      if (size && typeof size.width === "number" && typeof size.height === "number") {
+        widget.style.width = `${size.width}px`;
+        widget.style.height = `${size.height}px`;
+      }
+    } catch (e) {
+      console.warn("[RaterHubTracker] Failed to load widget size:", e);
     }
   }
 
@@ -189,7 +214,17 @@
     title.textContent = "Session Companion";
     title.style.fontWeight = "700";
     title.style.fontSize = "13px";
-    title.style.color = "#6d28d9";
+    title.style.color = "#0f172a";
+
+    collapsedTimerEl = document.createElement("span");
+    collapsedTimerEl.textContent = "00:00";
+    collapsedTimerEl.style.fontSize = "11px";
+    collapsedTimerEl.style.fontWeight = "700";
+    collapsedTimerEl.style.color = "#4b5563";
+    collapsedTimerEl.style.display = "none";
+
+    titleWrapper.appendChild(title);
+    titleWrapper.appendChild(collapsedTimerEl);
 
     collapsedTimerEl = document.createElement("span");
     collapsedTimerEl.textContent = "00:00";
@@ -378,7 +413,13 @@
     widget.appendChild(bodyContainer);
     document.body.appendChild(widget);
 
+    loadWidgetSize();
     loadWidgetPosition();
+
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => saveWidgetSize());
+      resizeObserver.observe(widget);
+    }
 
     header.addEventListener("pointerdown", onHeaderPointerDown);
     document.addEventListener("pointermove", onDocumentPointerMove);
