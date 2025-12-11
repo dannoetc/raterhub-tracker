@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>RaterHub Tracker</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 12px;
+        color: #1f2933;
+        width: 320px;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 18px;
+        color: #6d28d9;
+      }
+      .card {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 12px;
+        background: #f9f5ff;
+      }
+      ul {
+        padding-left: 18px;
+        margin: 6px 0;
+      }
+      .muted {
+        color: #6b7280;
+        font-size: 12px;
+      }
+      .status {
+        margin-top: 6px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>RaterHub Tracker</h1>
+    <div class="card">
+      <div class="status" id="auth-status">Checking login…</div>
+      <div id="last-status" class="muted">—</div>
+    </div>
+    <div class="card">
+      <strong>Shortcuts</strong>
+      <ul>
+        <li><code>Ctrl + Q</code> — Next question</li>
+        <li><code>Ctrl + Shift + P</code> — Pause/Resume</li>
+        <li><code>Ctrl + Shift + X</code> — Exit session</li>
+        <li><code>Ctrl + Shift + Q</code> — Undo last</li>
+      </ul>
+    </div>
+    <div class="card">
+      <strong>Session status</strong>
+      <div class="muted">Widget state persists per-tab; dragging & collapse are saved.</div>
+      <div id="session-info" class="status">Loading…</div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>
