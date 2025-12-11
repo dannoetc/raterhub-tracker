@@ -111,6 +111,18 @@ async function requestRefreshToken() {
   }
 }
 
+async function triggerLogin() {
+  showStatus("Signing in…");
+  const res = await chrome.runtime.sendMessage({ type: "LOGIN" });
+  if (res?.ok) {
+    showStatus("Logged in.", "success");
+  } else if (res?.error === "NO_CREDENTIALS") {
+    showStatus("Provide credentials first.", "error");
+  } else {
+    showStatus("Login failed.", "error");
+  }
+}
+
 async function testLogin() {
   showStatus("Testing login…");
   const res = await chrome.runtime.sendMessage({ type: "LOGIN", silent: true });
@@ -140,6 +152,7 @@ async function logout() {
 modeRadios.forEach((radio) => radio.addEventListener("change", toggleFieldVisibility));
 document.getElementById("save").addEventListener("click", save);
 document.getElementById("request-refresh").addEventListener("click", requestRefreshToken);
+document.getElementById("login").addEventListener("click", triggerLogin);
 document.getElementById("test-login").addEventListener("click", testLogin);
 document.getElementById("logout").addEventListener("click", logout);
 
