@@ -1,158 +1,68 @@
 # RaterHub Tracker
 
-RaterHub Tracker is a self-hosted, open-source productivity buddy that helps you keep honest, lightweight tabs on your time. It started as a helper for RaterHub tasks, but it works just as well for anyone who wants session-based timing without handing data to a third party. You get a friendly JS overlay while you rate, clear summaries, and full control over your data.
+RaterHub Tracker is a FastAPI application for session-based productivity tracking. It records event streams from a JavaScript widget (NEXT, PAUSE, UNDO, EXIT), aggregates timing per question and per day, and secures access with JWT authentication and CSRF protection.
 
-## ✨ Features
+## What you get
+- FastAPI backend with JWT auth, CSRF, and rate limits
+- Event-driven model that enforces valid session/question flows
+- Per-session and per-day dashboards (HTML + JSON) with pacing scores
+- Simple Jinja2 HTML flows plus a TamperMonkey-friendly widget
+- SQLite by default, PostgreSQL recommended for production
 
-- FastAPI-powered web backend
-- Intuitive JavaScript-based widget for tracking your progress as you rate
-- User authentication and session management
-- Event-driven model with NEXT / PAUSE / EXIT / UNDO
-- Shared, timestamped message schema across the extension's background and content scripts so every overlay action is synchronized
-- Session-aware responses that send updated `session_id`, question totals, and summaries back to the widget
-- Content script persistence for timers and identifiers (pause/resume, undo, cached summaries) that restores your overlay after navigation
-- Background worker listeners that catch tab updates and push refreshed summaries when the page reloads
-- Per-session and per-day dashboards with visual summaries
-- Intelligent pacing feedback with emoji-based scoring
-- Lightweight HTML UI using Jinja2 templates
-- PostgreSQL or SQLite database support
-- Timezone-aware reporting and filtering
-- Rate limiting and registration hardening
-
-## 🚀 Goals
-
-- Offer a private, transparent alternative to proprietary productivity tracking tools
-- Enable RaterHub users and similar contractors to maintain their own logs
-- Provide accurate time tracking for sessions and questions/tasks
-- Facilitate self-assessment and pacing improvements
-- Allow open-source contributions and customization for local or cloud hosting
-
-## ⚙️ Tech Stack
-
-- **Backend:** Python 3.10+, FastAPI, SQLAlchemy
-- **Frontend:** Jinja2 templating (simple HTML forms and dashboards)
-- **Auth:** JWT with secure cookie fallback
-- **Rate limiting:** SlowAPI (Redis optional)
-- **Database:** PostgreSQL (production) or SQLite (dev/testing)
-
-## 🔧 Installation
-
-### Prerequisites:
-
-#### Backend 
-- Python 3.10+
-- PostgreSQL database (or use SQLite for quick testing)
-#### Frontend 
-- Chromium based browser (Edge/Chrome) 
-- TamperMonkey browser addon
-- **Developer mode** turned on
-
-### Setup (local/dev):
-
+## Quickstart
 ```bash
-git clone https://github.com/dannoetc/personal/raterhub-tracker/raterhub-tracker.git
-cd raterhub-tracker/app
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Edit your .env with DB creds and secret keys
+cd app
+python -m venv .venv
+source .venv/bin/activate
+pip install -r ../requirements.txt
+# Supply environment variables (see below), then run:
 uvicorn main:app --reload
 ```
 
-### Docker Compose (production or quick deploy):
-
-A `docker-compose.yml` file is provided for containerized deployments. It includes:
-- FastAPI backend
-- PostgreSQL database
-- Optional Redis for advanced rate limiting
-
+Or run everything via Docker Compose:
 ```bash
 docker-compose up --build
 ```
 
-## 📄 .env Configuration
+## Configuration highlights
+Set these environment variables (or add them to `.env`):
+- `SECRET_KEY` (required): signs JWTs and CSRF HMACs; app exits if missing.
+- `ACCESS_TOKEN_EXPIRE_MINUTES` (default `1440`): token lifetime.
+- `DATABASE_URL` (default `sqlite:///./app.db`): SQLAlchemy connection string.
+- `SESSION_COOKIE_SECURE` (default `True` unless `DEBUG=true`): `Secure` flag on cookies.
+- `ALLOWED_ORIGINS`: comma-separated CORS whitelist for the widget and HTML flows.
 
-Your `.env` file should define values like:
+## Architecture at a glance
+- **Entrypoint:** `app/main.py` wires FastAPI, middleware, rate limiting, CSRF helpers, and routes.
+- **Auth:** JWT bearer tokens issued in `app/auth.py`, accepted via header or `access_token` cookie.
+- **Persistence:** SQLAlchemy models in `app/db_models.py`; session factory in `app/database.py`.
+- **Schemas:** Request/response shapes live in `app/models.py`.
 
-```env
-SECRET_KEY=your-secret-key
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
-DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/raterhub
-ALLOWED_ORIGINS=https://raterhub.com,https://www.raterhub.com
-```
+## Event flow (widget → backend)
+- Events POST to `/events` with `NEXT`, `PAUSE`, `UNDO`, or `EXIT` plus a timestamp.
+- `NEXT` starts sessions and advances questions; `EXIT` ends the session.
+- `PAUSE` toggles paused state and accumulates paused time; `UNDO` rewinds the last question.
 
-## ⚖️ Security Notes
+## Key endpoints
+- Health: `GET /health`
+- Auth: `GET /auth/csrf`, `POST /auth/register`, `POST /auth/login`, `GET /me`
+- Sessions & events: `POST /events`, `GET /summary/{session_id}`, `DELETE /sessions/{session_id}`, `DELETE /sessions/{session_id}/questions/{question_id}`
+- Dashboards: `GET /dashboard/today` (HTML) and `/dashboard/today/json`
+- Profile: `GET/POST /profile`
 
-- Passwords are hashed with bcrypt
-- JWT access tokens are short-lived and stored via secure HTTP-only cookies
-- Session creation is restricted to valid "NEXT" events only
-- Rate limits are enforced on `/login`, `/register`, and `/events`
-- Sensitive routes require authentication and user ownership checks
+## Dashboards & pacing
+Session summaries show per-question durations (raw vs. active) and pacing feedback. Daily dashboards bucket activity by hour and compute weighted pacing across sessions; target pace defaults to 5.5 minutes per question unless overridden per session.
 
-## 📃 Documentation
+## Security & operations
+- Passwords must meet a 12-character mixed-case/digit/symbol policy and avoid recent reuse.
+- CSRF tokens are required for login/registration and are issued via `GET /auth/csrf` (cookie + header/form echo).
+- SlowAPI rate limits protect auth and event ingestion; login throttling tracks per-account and per-IP failures.
+- Tables auto-create on startup via SQLAlchemy metadata; persist volumes in Docker deployments.
 
-You can visit `/docs` when running locally to access the FastAPI auto-generated API docs.
+## More documentation
+See `documentation.md` for the full guide covering architecture, security posture, dashboards, and operational tips. OpenAPI docs are available at `/docs` when the server is running.
 
-## 📃 TODO: Production Hardening & Cleanup
-
-The following items remain before the application is considered production-ready and stable for self-hosting or open-source distribution:
-
-### ✅ Completed
-- [x] Environment-based config externalized via `config.py` and `.env`
-- [x] Secure password hashing (bcrypt via `passlib`)
-- [x] JWT-based auth with configurable expiry
-- [x] UI widget (TamperMonkey) with backend session sync and active timers
-- [x] Rate limiting via `slowapi`
-- [x] Dockerfile and Docker Compose for self-contained deployment
-- [x] Per-user timezone support
-- [x] Session and question deletion
-- [x] Session locking to prevent invalid sequences
-- [x] RESTful API and HTML dashboard views
-- [x] Complete pinned `requirements.txt`
-
-### 🔒 Security & Access Control
-- [ ] Add email verification for registration flow
-- [ ] Prevent reuse of known weak passwords
-- [ ] Add optional admin-only registration or invite-only flag
-- [ ] Implement brute-force protection beyond rate limiting (e.g. exponential backoff)
-- [ ] Sanitize and validate user input more rigorously
-
-### 📈 Observability
-- [ ] Add logging (file + console, configurable level via env)
-- [ ] Add healthcheck endpoint for container orchestrators
-- [ ] Add metrics or Prometheus-compatible exporter for event tracking
-
-### 🧪 Testing & QA
-- [ ] Add unit tests for auth, event handling, and DB logic
-- [ ] Add a minimal integration test script (pytest + HTTPX)
-- [ ] Add a test harness for widget → backend interaction
-
-### 💅 UX Polish
-- [ ] Add password reset flow (via email or temporary token)
-- [ ] Add profile settings for AHT customization per user
-- [ ] Localize time and duration display in the widget more clearly
-- [ ] Improve error display in HTML login/register forms
-
-### 🔧 Deployment & Tooling
-- [ ] Add sample `nginx` config for SSL proxying
-- [ ] Add GitHub Actions CI for linting/tests
-
-### 📚 Documentation
-- [ ] Add full setup guide to `README.md` (Quickstart, .env, Docker)
-- [ ] Add API docs (OpenAPI is available, but summarize common endpoints)
-- [ ] Add user guide for widget usage and keyboard shortcuts
-- [ ] Add admin guide for self-hosted environments
-
-## 🌟 Contributing
-
-This project is open to community contributions. Suggestions, issues, and PRs are welcome.
-
-## ✅ License
+## License
 
 MIT License. See `LICENSE` for details.
-
----
-
-Maintained by Dan Nelson. Originally built for RaterHub power users.
 
