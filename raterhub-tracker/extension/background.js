@@ -9,6 +9,15 @@ const CREDENTIALS_KEY = "raterhubCredentials_v1";
 const CRYPTO_KEY = "raterhubCredentialsKey_v1";
 const throttleMap = {};
 
+const MESSAGE_TYPES = {
+  CONTROL_EVENT: "SEND_EVENT",
+  FIND_ACTIVE_SESSION: "FIND_ACTIVE_SESSION",
+  LOGIN: "LOGIN",
+  SESSION_SUMMARY: "SESSION_SUMMARY",
+  RESET_WIDGET_STATE: "RESET_WIDGET_STATE",
+  SESSION_SUMMARY_RELAY: "SESSION_SUMMARY_RELAY",
+};
+
 let authState = {
   accessToken: null,
   csrfToken: null,
@@ -109,6 +118,10 @@ function throttle(key, windowMs = 750) {
 function isInternalPage(sender) {
   const base = chrome.runtime.getURL("");
   return Boolean(sender?.url && sender.url.startsWith(base));
+}
+
+function buildMessage(type, payload = {}) {
+  return { type, timestamp: Date.now(), ...payload };
 }
 
 // ============================================================
@@ -288,7 +301,9 @@ async function logoutAndReset() {
   try {
     const tabs = await chrome.tabs.query({ url: "https://*.raterhub.com/*" });
     for (const tab of tabs) {
-      chrome.tabs.sendMessage(tab.id, { type: "RESET_WIDGET_STATE" }).catch(() => {});
+      chrome.tabs
+        .sendMessage(tab.id, buildMessage(MESSAGE_TYPES.RESET_WIDGET_STATE))
+        .catch(() => {});
     }
   } catch (err) {
     console.warn("[RaterHubTracker] Failed to broadcast reset", err);
@@ -391,7 +406,7 @@ async function findActiveSession() {
   }
 }
 
-async function sendEvent(eventType) {
+async function sendEvent(eventType, options = {}) {
   // Record a timestamped event and retry authentication on 401s.
   const gate = await ensureAccessToken();
   if (!gate.ok) return gate;
@@ -403,8 +418,17 @@ async function sendEvent(eventType) {
 
   const payload = {
     type: eventType,
-    timestamp: new Date().toISOString(),
+    timestamp: options.clientTimestamp
+      ? new Date(options.clientTimestamp).toISOString()
+      : new Date().toISOString(),
   };
+
+  if (options.sessionId) {
+    payload.session_id = options.sessionId;
+  }
+  if (typeof options.questionIndex === "number") {
+    payload.current_question_index = options.questionIndex;
+  }
 
   try {
     const makeRequest = () =>
@@ -438,11 +462,50 @@ async function sendEvent(eventType) {
 
     const data = await res.json();
     setLastStatus(`Event ${eventType} recorded`);
-    return { ok: true, data };
+
+    const sessionId = data.session_id || options.sessionId || null;
+    let summary = null;
+    if (sessionId) {
+      const summaryRes = await fetchSessionSummary(sessionId);
+      if (summaryRes.ok) {
+        summary = summaryRes.summary || null;
+      }
+    }
+
+    const totalQuestions =
+      typeof data.total_questions === "number"
+        ? data.total_questions
+        : summary?.total_questions ?? null;
+
+    return {
+      ok: true,
+      data,
+      sessionId,
+      totalQuestions,
+      summary,
+    };
   } catch (err) {
     console.error("[RaterHubTracker] Event error", err);
     setLastStatus(`Event ${eventType} network error`);
     return { ok: false, error: "NETWORK" };
+  }
+}
+
+async function pushLatestSummaryToTab(tabId) {
+  try {
+    const activeRes = await findActiveSession();
+    if (!activeRes?.ok || !activeRes.activeSession?.session_id) return;
+    const sessionId = activeRes.activeSession.session_id;
+    const summaryRes = await fetchSessionSummary(sessionId);
+    if (!summaryRes?.ok || !summaryRes.summary) return;
+    const message = buildMessage(MESSAGE_TYPES.SESSION_SUMMARY_RELAY, {
+      sessionId,
+      summary: summaryRes.summary,
+      totalQuestions: summaryRes.summary?.total_questions ?? null,
+    });
+    chrome.tabs.sendMessage(tabId, message).catch(() => {});
+  } catch (err) {
+    console.warn("[RaterHubTracker] Failed to push summary", err);
   }
 }
 
@@ -453,24 +516,28 @@ async function sendEvent(eventType) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message?.type) {
-      case "LOGIN": {
+      case MESSAGE_TYPES.LOGIN: {
         const res = await login({ silent: Boolean(message?.silent) });
-        sendResponse(res);
+        sendResponse(buildMessage(MESSAGE_TYPES.LOGIN, res));
         return;
       }
-      case "SEND_EVENT": {
-        const res = await sendEvent(message.eventType);
-        sendResponse(res);
+      case MESSAGE_TYPES.CONTROL_EVENT: {
+        const res = await sendEvent(message.eventType, {
+          sessionId: message.sessionId,
+          questionIndex: message.questionIndex,
+          clientTimestamp: message.timestamp,
+        });
+        sendResponse(buildMessage(MESSAGE_TYPES.CONTROL_EVENT, res));
         return;
       }
-      case "SESSION_SUMMARY": {
+      case MESSAGE_TYPES.SESSION_SUMMARY: {
         const res = await fetchSessionSummary(message.sessionId);
-        sendResponse(res);
+        sendResponse(buildMessage(MESSAGE_TYPES.SESSION_SUMMARY, res));
         return;
       }
-      case "FIND_ACTIVE_SESSION": {
+      case MESSAGE_TYPES.FIND_ACTIVE_SESSION: {
         const res = await findActiveSession();
-        sendResponse(res);
+        sendResponse(buildMessage(MESSAGE_TYPES.FIND_ACTIVE_SESSION, res));
         return;
       }
       case "GET_STATUS": {
@@ -548,6 +615,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   })();
   return true;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete" && tab?.url?.includes("raterhub.com")) {
+    pushLatestSummaryToTab(tabId);
+  }
 });
 
 loadAuthFromStorage();

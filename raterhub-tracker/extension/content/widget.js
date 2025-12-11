@@ -2,6 +2,15 @@
   const POS_KEY = "raterhubTrackerPos_v2";
   const STATE_KEY = "raterhubTrackerState_v2";
 
+  const MESSAGE_TYPES = {
+    CONTROL_EVENT: "SEND_EVENT",
+    FIND_ACTIVE_SESSION: "FIND_ACTIVE_SESSION",
+    LOGIN: "LOGIN",
+    SESSION_SUMMARY: "SESSION_SUMMARY",
+    SESSION_SUMMARY_RELAY: "SESSION_SUMMARY_RELAY",
+    RESET_WIDGET_STATE: "RESET_WIDGET_STATE",
+  };
+
   // --- UI + session state ---
   let questionIndex = 0;
   let currentSessionId = null;
@@ -10,6 +19,7 @@
   let timerIntervalId = null;
   let isPaused = false;
   let isCollapsed = false;
+  let lastSummary = null;
 
   // --- Widget elements ---
   let widget,
@@ -72,6 +82,10 @@
         questionIndex,
         currentSessionId,
         isCollapsed,
+        accumulatedActiveMs,
+        questionStartTime,
+        isPaused,
+        lastSummary,
       };
       await storageSet(STATE_KEY, state);
     } catch (e) {
@@ -91,6 +105,18 @@
       }
       if (typeof state.isCollapsed === "boolean") {
         isCollapsed = state.isCollapsed;
+      }
+      if (typeof state.accumulatedActiveMs === "number") {
+        accumulatedActiveMs = state.accumulatedActiveMs;
+      }
+      if (typeof state.questionStartTime === "number") {
+        questionStartTime = state.questionStartTime;
+      }
+      if (typeof state.isPaused === "boolean") {
+        isPaused = state.isPaused;
+      }
+      if (typeof state.lastSummary === "object" && state.lastSummary !== null) {
+        lastSummary = state.lastSummary;
       }
     } catch (e) {
       console.warn("[RaterHubTracker] Failed to load state:", e);
@@ -367,9 +393,43 @@
     startTimerLoop();
   }
 
+  function restoreTimerFromState() {
+    if (isPaused) {
+      questionStartTime = null;
+      stopTimerLoop();
+      updateTimerDisplay();
+      return;
+    }
+
+    if (questionStartTime) {
+      accumulatedActiveMs += Math.max(0, Date.now() - questionStartTime);
+      questionStartTime = Date.now();
+      startTimerLoop();
+    } else if (accumulatedActiveMs > 0) {
+      startTimerLoop();
+    }
+
+    updateTimerDisplay();
+  }
+
   function updateSessionStatsText(text) {
     if (!sessionStatsEl) return;
     sessionStatsEl.textContent = text;
+  }
+
+  function applySessionSummary(summary) {
+    if (!summary) return;
+    lastSummary = summary;
+    if (summary.is_active === false) {
+      hardResetSessionUI("Session: ended");
+      return;
+    }
+    const totalQ = summary.total_questions ?? 0;
+    const avg = summary.avg_active_mmss || "00:00";
+    const emoji = summary.pace_emoji || "";
+    const label = summary.pace_label || "";
+    updateSessionStatsText(`Session: ${totalQ} q, AHT ${avg} ${emoji} ${label}`);
+    saveState();
   }
 
   function hardResetSessionUI(reasonText) {
@@ -378,6 +438,7 @@
     accumulatedActiveMs = 0;
     questionStartTime = null;
     isPaused = false;
+    lastSummary = null;
     stopTimerLoop();
     updateQuestionDisplay();
     updateTimerDisplay();
@@ -389,9 +450,10 @@
   // Messaging helpers
   // -----------------------------------------
 
-  function sendRuntimeMessage(payload) {
-    return chrome.runtime.sendMessage(payload).catch((err) => {
-      console.warn("[RaterHubTracker] Message failed", payload, err);
+  function sendRuntimeMessage(type, payload = {}) {
+    const message = { type, timestamp: Date.now(), ...payload };
+    return chrome.runtime.sendMessage(message).catch((err) => {
+      console.warn("[RaterHubTracker] Message failed", message, err);
       return { ok: false, error: "MESSAGE_FAILED" };
     });
   }
@@ -402,8 +464,7 @@
       return;
     }
 
-    const res = await sendRuntimeMessage({
-      type: "SESSION_SUMMARY",
+    const res = await sendRuntimeMessage(MESSAGE_TYPES.SESSION_SUMMARY, {
       sessionId: currentSessionId,
     });
 
@@ -415,18 +476,7 @@
       return;
     }
 
-    const summary = res.summary || {};
-    if (summary.is_active === false) {
-      hardResetSessionUI("Session: ended");
-      return;
-    }
-
-    const totalQ = summary.total_questions ?? 0;
-    const avg = summary.avg_active_mmss || "00:00";
-    const emoji = summary.pace_emoji || "";
-    const label = summary.pace_label || "";
-
-    updateSessionStatsText(`Session: ${totalQ} q, AHT ${avg} ${emoji} ${label}`);
+    applySessionSummary(res.summary || {});
   }
 
   async function syncFromBackend() {
@@ -435,7 +485,7 @@
       return;
     }
 
-    const res = await sendRuntimeMessage({ type: "FIND_ACTIVE_SESSION" });
+    const res = await sendRuntimeMessage(MESSAGE_TYPES.FIND_ACTIVE_SESSION);
     if (!res?.ok || !res.activeSession) {
       updateSessionStatsText("Session: –");
       return;
@@ -453,7 +503,7 @@
 
   async function login() {
     setStatus("Logging in…", "#4b5563");
-    const res = await sendRuntimeMessage({ type: "LOGIN" });
+    const res = await sendRuntimeMessage(MESSAGE_TYPES.LOGIN);
 
     if (!res?.ok) {
       setStatus("Login failed", "#b91c1c");
@@ -469,7 +519,11 @@
   }
 
   async function sendEvent(eventType) {
-    const res = await sendRuntimeMessage({ type: "SEND_EVENT", eventType });
+    const res = await sendRuntimeMessage(MESSAGE_TYPES.CONTROL_EVENT, {
+      eventType,
+      sessionId: currentSessionId,
+      questionIndex,
+    });
 
     if (!res?.ok) {
       if (res?.error === "THROTTLED") {
@@ -487,15 +541,21 @@
     }
 
     const data = res.data || {};
+    const sessionIdFromResponse = res.sessionId || data.session_id || null;
+    const backendTotal =
+      typeof res.totalQuestions === "number"
+        ? res.totalQuestions
+        : typeof data.total_questions === "number"
+          ? data.total_questions
+          : null;
+
     setStatus(`Event ${eventType} recorded ✔`, "#15803d");
     lastEventEl.textContent = `Last event: ${eventType} @ ${new Date().toLocaleTimeString()}`;
     flashWidget("#22c55e");
 
-    if (data && typeof data.session_id === "string") {
-      currentSessionId = data.session_id;
+    if (sessionIdFromResponse) {
+      currentSessionId = sessionIdFromResponse;
     }
-
-    const backendTotal = typeof data.total_questions === "number" ? data.total_questions : null;
 
     if (eventType === "NEXT") {
       if (backendTotal !== null) {
@@ -525,7 +585,11 @@
     }
 
     updateQuestionDisplay();
-    await refreshSessionSummary();
+    if (res.summary) {
+      applySessionSummary(res.summary);
+    } else {
+      await refreshSessionSummary();
+    }
     saveState();
   }
 
@@ -571,31 +635,33 @@
     createWidget();
     await loadState();
     updateQuestionDisplay();
-    updateTimerDisplay();
+    restoreTimerFromState();
     applyCollapsedState();
     updateUserDisplay(false);
     setStatus("Loaded – logging in…", "#4b5563");
-    updateSessionStatsText("Session: –");
+    if (lastSummary) {
+      applySessionSummary(lastSummary);
+    } else {
+      updateSessionStatsText("Session: –");
+    }
 
     window.addEventListener("keydown", handleKeydown, true);
     chrome.runtime.onMessage.addListener((message) => {
-      if (message?.type === "RESET_WIDGET_STATE") {
+      if (message?.type === MESSAGE_TYPES.RESET_WIDGET_STATE) {
         hardResetSessionUI("Session: –");
         updateUserDisplay(false);
         setStatus("Logged out", "#6b7280");
         return;
       }
-      if (message?.type === "SESSION_SUMMARY_RELAY" && message.summary) {
-        const summary = message.summary;
-        if (summary.is_active === false) {
-          hardResetSessionUI("Session: ended");
-          return;
+      if (message?.type === MESSAGE_TYPES.SESSION_SUMMARY_RELAY && message.summary) {
+        if (typeof message.totalQuestions === "number") {
+          questionIndex = message.totalQuestions;
+          updateQuestionDisplay();
         }
-        const totalQ = summary.total_questions ?? 0;
-        const avg = summary.avg_active_mmss || "00:00";
-        const emoji = summary.pace_emoji || "";
-        const label = summary.pace_label || "";
-        updateSessionStatsText(`Session: ${totalQ} q, AHT ${avg} ${emoji} ${label}`);
+        if (typeof message.sessionId === "string") {
+          currentSessionId = message.sessionId;
+        }
+        applySessionSummary(message.summary);
       }
     });
 
