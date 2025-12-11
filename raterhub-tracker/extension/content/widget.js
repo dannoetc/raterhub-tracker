@@ -215,7 +215,7 @@
     title.textContent = "Session Companion";
     title.style.fontWeight = "700";
     title.style.fontSize = "13px";
-    title.style.color = "#6d28d9";
+    title.style.color = "#0f172a";
 
     collapsedTimerEl = document.createElement("span");
     collapsedTimerEl.textContent = "00:00";
