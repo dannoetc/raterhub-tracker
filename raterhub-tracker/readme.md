@@ -71,7 +71,7 @@ The backend computes timing stats per question and persists each session.
 
 - `/dashboard/today` — View today’s sessions, timing, pace emojis, and scores
 - `/dashboard/sessions/<id>` — Inspect each question inside a session
-- `/profile` — Set your preferred timezone for local time display
+- `/profile` — Manage personal details, timezone, and password
 
 ---
 
@@ -90,6 +90,18 @@ The backend computes timing stats per question and persists each session.
 - CSRF tokens for login/registration flows
 - Passwords hashed with bcrypt
 - Sessions cannot be created by non-NEXT events
+
+---
+
+## 🗄️ Database migration for name fields
+
+If you're upgrading an existing deployment, run the helper script to add the
+`first_name` and `last_name` columns to the `users` table (safe to re-run):
+
+```bash
+SECRET_KEY=your-secret DATABASE_URL=postgresql+psycopg2://... \\
+    python scripts/add_user_name_columns.py
+```
 
 ---
 
