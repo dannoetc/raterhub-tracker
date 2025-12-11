@@ -794,7 +794,11 @@ def dashboard_session(
     summary = build_session_summary(db, current_user, session_public_id)
     return templates.TemplateResponse(
         "session.html",
-        {"request": request, "summary": summary},
+        {
+            "request": request,
+            "summary": summary,
+            "current_user_email": getattr(current_user, "email", None),
+        },
     )
 
 # ============================================================
@@ -838,6 +842,7 @@ def build_day_summary(
     ]
 
     if not sessions:
+        hourly_buckets = [0.0 for _ in range(24)]
         daily_pace = compute_pace(0.0, 0.0)
         return TodaySummary(
             date=local_start,  # report date as local midnight
@@ -872,6 +877,14 @@ def build_day_summary(
 
         # Filter ghost questions
         qs = [q for q in qs_all if not is_ghost_question(q)]
+
+        for q in qs:
+            q_local_start = to_user_local(q.started_at, user)
+            if not q_local_start:
+                continue
+            if q_local_start < local_start or q_local_start >= local_end:
+                continue
+            hourly_activity[q_local_start.hour] += 1
 
         if not qs:
             items.append(
@@ -941,7 +954,20 @@ def build_day_summary(
         if total_questions_all
         else 0.0
     )
-    daily_pace = compute_pace(avg_active_day, avg_target_minutes)
+    daily_pace = (
+        compute_pace(avg_active_day, avg_target_minutes)
+        if total_questions_all
+        else {"pace_label": "No questions", "pace_emoji": "😴"}
+    )
+
+    hourly_activity = [
+        HourlyActivity(
+            hour=hour,
+            active_seconds=seconds,
+            total_questions=hourly_question_counts[hour],
+        )
+        for hour, seconds in enumerate(hourly_buckets)
+    ]
 
     return TodaySummary(
         date=local_start,  # stored as local midnight in user's TZ
@@ -1018,6 +1044,7 @@ def dashboard_today(
             "summary": summary,
             "selected_date": selected_date_str,
             "user_timezone": getattr(current_user, "timezone", None),
+            "current_user_email": getattr(current_user, "email", None),
         },
     )
 
