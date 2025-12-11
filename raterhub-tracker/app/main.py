@@ -841,14 +841,15 @@ def build_day_summary(
             total_active_mmss="00:00",
             avg_active_seconds=0.0,
             avg_active_mmss="00:00",
-            daily_score=0,
+            daily_pace_label="No questions",
+            daily_pace_emoji="😴",
             sessions=[],
         )
 
     total_sessions = 0
     total_questions_all = 0
     total_active_all = 0.0
-    total_score_weighted = 0.0
+    total_target_minutes_weighted = 0.0
     items: List[TodaySessionItem] = []
 
     for s in sessions:
@@ -887,11 +888,12 @@ def build_day_summary(
         count = len(qs)
         avg_active = total_active / count if count else 0.0
 
-        pace = compute_pace(avg_active, s.target_minutes_per_question or 5.5)
+        target_minutes = s.target_minutes_per_question or 5.5
+        pace = compute_pace(avg_active, target_minutes)
 
         total_questions_all += count
         total_active_all += total_active
-        total_score_weighted += pace["score"] * count
+        total_target_minutes_weighted += target_minutes * count
 
         items.append(
             TodaySessionItem(
@@ -912,10 +914,15 @@ def build_day_summary(
     avg_active_day = (
         total_active_all / total_questions_all if total_questions_all else 0.0
     )
-    daily_score = (
-        round(total_score_weighted / total_questions_all)
+    avg_target_minutes = (
+        total_target_minutes_weighted / total_questions_all
         if total_questions_all
-        else 0
+        else 0.0
+    )
+    daily_pace = (
+        compute_pace(avg_active_day, avg_target_minutes)
+        if total_questions_all
+        else {"pace_label": "No questions", "pace_emoji": "😴"}
     )
 
     return TodaySummary(
@@ -927,7 +934,8 @@ def build_day_summary(
         total_active_mmss=format_hhmm_or_mmss_for_dashboard(total_active_all),
         avg_active_seconds=avg_active_day,
         avg_active_mmss=format_hhmm_or_mmss_for_dashboard(avg_active_day),
-        daily_score=daily_score,
+        daily_pace_label=daily_pace["pace_label"],
+        daily_pace_emoji=daily_pace["pace_emoji"],
         sessions=items,
     )
 

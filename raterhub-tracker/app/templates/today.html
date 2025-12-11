@@ -354,18 +354,12 @@
         </div>
 
         <div class="summary-card">
-            <div class="summary-label">Daily Score</div>
+            <div class="summary-label">Daily Pace</div>
             <div class="summary-value">
-                {% set score = summary.daily_score or 0 %}
-                <span class="score-pill
-                    {% if score >= 80 %}score-good
-                    {% elif score >= 50 %}score-mid
-                    {% else %}score-bad
-                    {% endif %}
-                ">{{ score }}/100</span>
+                <span class="pace-chip">{{ summary.daily_pace_emoji }} {{ summary.daily_pace_label }}</span>
             </div>
             <div class="summary-extra">
-                Weighted by question count
+                Based on average time vs target
             </div>
         </div>
     </div>

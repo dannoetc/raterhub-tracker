@@ -96,7 +96,8 @@ class TodaySummary(BaseModel):
 
     avg_active_seconds: float
     avg_active_mmss: str
-    daily_score: int
+    daily_pace_label: str
+    daily_pace_emoji: str
 
     sessions: list[TodaySessionItem]
 
