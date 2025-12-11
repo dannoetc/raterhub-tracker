@@ -23,6 +23,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     external_id = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
+    first_name = Column(String, nullable=True, default="")
+    last_name = Column(String, nullable=True, default="")
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)

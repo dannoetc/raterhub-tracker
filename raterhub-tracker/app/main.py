@@ -449,6 +449,8 @@ def register_api(
     user = User(
         external_id=user_in.email,
         email=user_in.email,
+        first_name=(user_in.first_name or "").strip(),
+        last_name=(user_in.last_name or "").strip(),
         created_at=now,
         last_login_at=now,
         password_hash=get_password_hash(user_in.password),
@@ -578,6 +580,8 @@ def register_web(
     email: str = Form(...),
     password: str = Form(...),
     password_confirm: str = Form(...),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
     db: OrmSession = Depends(get_db),
 ):
     """
@@ -593,6 +597,8 @@ def register_web(
             {
                 "error": "Invalid or missing CSRF token.",
                 "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
             },
         )
         response.status_code = 400
@@ -605,6 +611,8 @@ def register_web(
             {
                 "error": "Passwords do not match.",
                 "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
             },
         )
         response.status_code = 400
@@ -618,6 +626,8 @@ def register_web(
             {
                 "error": "That email is already registered.",
                 "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
             },
         )
         response.status_code = 400
@@ -627,6 +637,8 @@ def register_web(
     user = User(
         external_id=email,
         email=email,
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
         created_at=now,
         last_login_at=now,
         password_hash=get_password_hash(password),
@@ -685,6 +697,8 @@ def me(current_user: User = Depends(get_current_user)):
         "id": current_user.id,
         "email": current_user.email,
         "external_id": current_user.external_id,
+        "first_name": getattr(current_user, "first_name", None),
+        "last_name": getattr(current_user, "last_name", None),
         "created_at": current_user.created_at,
         "last_login_at": current_user.last_login_at,
         "is_active": current_user.is_active,
@@ -1525,16 +1539,81 @@ def admin_dashboard(
 # Profile (timezone, etc.)
 # ============================================================
 
+COMMON_TIMEZONES = [
+    "UTC",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "Europe/London",
+    "Europe/Amsterdam",
+    "Europe/Berlin",
+    "Asia/Kolkata",
+    "Asia/Singapore",
+    "Asia/Tokyo",
+    "Australia/Sydney",
+]
+
+
+def _format_timezone_option(tz_name: str):
+    try:
+        tz_info = ZoneInfo(tz_name)
+    except Exception:
+        return None
+
+    now = datetime.now(tz_info)
+    offset = now.utcoffset() or timedelta(0)
+    total_minutes = int(offset.total_seconds() // 60)
+    hours, minutes = divmod(abs(total_minutes), 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    label = f"UTC{sign}{hours:02d}:{minutes:02d}"
+    display_name = tz_name.replace("_", " ")
+
+    return {"value": tz_name, "label": f"{display_name} ({label})"}
+
+
+def _timezone_options(selected: Optional[str] = None):
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for tz_name in COMMON_TIMEZONES:
+        option = _format_timezone_option(tz_name)
+        if option:
+            options.append(option)
+            seen.add(tz_name)
+
+    if selected and selected not in seen:
+        fallback_option = _format_timezone_option(selected)
+        if fallback_option:
+            options.append(fallback_option)
+
+    return options
+
+
+def _coerce_timezone(tz_name: str, fallback: str = "UTC") -> str:
+    try:
+        ZoneInfo(tz_name)
+        return tz_name
+    except Exception:
+        try:
+            ZoneInfo(fallback)
+            return fallback
+        except Exception:
+            return "UTC"
+
+
 @app.get("/profile", response_class=HTMLResponse)
 def profile_form(
     request: Request,
     current_user: User = Depends(get_current_user),
 ):
-    return templates.TemplateResponse(
+    return render_template_with_csrf(
         "profile.html",
+        request,
         {
-            "request": request,
             "user": current_user,
+            "timezone_options": _timezone_options(current_user.timezone or "UTC"),
+            "selected_timezone": current_user.timezone or "UTC",
         },
     )
 
@@ -1542,26 +1621,87 @@ def profile_form(
 @app.post("/profile", response_class=HTMLResponse)
 def profile_update(
     request: Request,
-    timezone_name: str = Form(...),
+    form_type: str = Form(...),
+    csrf_token: Optional[str] = Form(None),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    timezone_name: str = Form(""),
+    current_password: Optional[str] = Form(None),
+    new_password: Optional[str] = Form(None),
+    new_password_confirm: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     db: OrmSession = Depends(get_db),
 ):
-    # Basic validation: must be a valid IANA timezone or fall back to UTC
-    try:
-        _ = ZoneInfo(timezone_name)
-        valid_tz = timezone_name
-    except Exception:
-        valid_tz = "UTC"
+    profile_message = None
+    profile_error = None
+    password_message = None
+    password_error = None
 
-    current_user.timezone = valid_tz
-    db.commit()
-    db.refresh(current_user)
+    if not validate_csrf(request, csrf_token):
+        profile_error = "Invalid or missing CSRF token."
+    elif form_type == "profile":
+        current_user.first_name = first_name.strip()
+        current_user.last_name = last_name.strip()
+        current_user.timezone = _coerce_timezone(
+            timezone_name or (current_user.timezone or "UTC")
+        )
 
-    return templates.TemplateResponse(
-        "profile.html",
-        {
-            "request": request,
-            "user": current_user,
-            "message": "Profile updated.",
-        },
-    )
+        db.commit()
+        db.refresh(current_user)
+        profile_message = "Profile updated."
+
+    elif form_type == "password":
+        if not current_user.password_hash:
+            password_error = "Password updates are unavailable for your account."
+        elif not current_password or not verify_password(
+            current_password, current_user.password_hash
+        ):
+            password_error = "Your current password is incorrect."
+        elif not new_password or not new_password_confirm:
+            password_error = "Please provide and confirm your new password."
+        elif new_password != new_password_confirm:
+            password_error = "New passwords do not match."
+        else:
+            recent_passwords = (
+                db.query(PasswordHistory)
+                .filter(PasswordHistory.user_id == current_user.id)
+                .order_by(PasswordHistory.created_at.desc())
+                .limit(5)
+                .all()
+            )
+            recent_hashes = [p.password_hash for p in recent_passwords]
+            is_valid, policy_error = validate_password_policy(
+                new_password, recent_hashes
+            )
+
+            if not is_valid:
+                password_error = policy_error
+            else:
+                new_hash = get_password_hash(new_password)
+                current_user.password_hash = new_hash
+                db.add(
+                    PasswordHistory(user_id=current_user.id, password_hash=new_hash)
+                )
+                db.commit()
+                db.refresh(current_user)
+                password_message = "Password updated successfully."
+    else:
+        profile_error = "Unknown form submission."
+
+    context = {
+        "request": request,
+        "user": current_user,
+        "timezone_options": _timezone_options(current_user.timezone or "UTC"),
+        "selected_timezone": current_user.timezone or "UTC",
+        "profile_message": profile_message,
+        "profile_error": profile_error,
+        "password_message": password_message,
+        "password_error": password_error,
+    }
+
+    response = render_template_with_csrf("profile.html", request, context)
+
+    if profile_error or password_error:
+        response.status_code = 400
+
+    return response

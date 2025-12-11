@@ -124,6 +124,8 @@ class TokenData(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
+    first_name: Optional[str] = ""
+    last_name: Optional[str] = ""
 
 
 class UserLogin(BaseModel):

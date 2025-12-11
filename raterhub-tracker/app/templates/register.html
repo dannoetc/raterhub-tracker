@@ -105,6 +105,24 @@
 
     <form method="post" action="/register">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="first_name">First name (optional)</label>
+        <input
+            type="text"
+            id="first_name"
+            name="first_name"
+            value="{{ first_name or '' }}"
+            autocomplete="given-name"
+        >
+
+        <label for="last_name">Last name (optional)</label>
+        <input
+            type="text"
+            id="last_name"
+            name="last_name"
+            value="{{ last_name or '' }}"
+            autocomplete="family-name"
+        >
+
         <label for="email">Email</label>
         <input
             type="email"
