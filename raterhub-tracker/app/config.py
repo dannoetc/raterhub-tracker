@@ -1,6 +1,13 @@
 import os
 from pathlib import Path
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
 class Settings:
     PROJECT_NAME = "RaterHub Tracker"
     VERSION = "0.5.2"
@@ -14,6 +21,9 @@ class Settings:
 
     # Database
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+
+    # Cookies
+    SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE", default=not DEBUG)
 
     # Templates
     TEMPLATES_DIR = str(Path(__file__).resolve().parent / "templates") + "/"

@@ -336,7 +336,7 @@ def login_web(
         key="access_token",
         value=token,
         httponly=True,
-        secure=not settings.DEBUG,
+        secure=settings.SESSION_COOKIE_SECURE,
         samesite="lax",
         max_age=60 * 60 * 24,
     )
@@ -412,7 +412,7 @@ def register_web(
         key="access_token",
         value=token,
         httponly=True,
-        secure=not settings.DEBUG,
+        secure=settings.SESSION_COOKIE_SECURE,
         samesite="lax",
         max_age=60 * 60 * 24,
     )
@@ -425,7 +425,7 @@ def logout(request: Request):
     response.delete_cookie(
         key="access_token",
         samesite="lax",
-        secure=not settings.DEBUG,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
     return response
 
@@ -436,7 +436,7 @@ def logout_post(request: Request):
     response.delete_cookie(
         key="access_token",
         samesite="lax",
-        secure=not settings.DEBUG,
+        secure=settings.SESSION_COOKIE_SECURE,
     )
     return response
 
