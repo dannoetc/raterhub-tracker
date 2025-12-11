@@ -1,8 +1,12 @@
+// ============================================================
+// Constants and in-memory state
+// ============================================================
+
 const API_BASE = "https://api.raterhub.steigenga.com";
-const LOGIN_EMAIL = "melissa517.freelancer@gmail.com";
-const LOGIN_PASSWORD = "super-secret";
 const AUTH_KEY = "raterhubAuth_v1";
 const STATUS_KEY = "raterhubLastStatus_v1";
+const CREDENTIALS_KEY = "raterhubCredentials_v1";
+const CRYPTO_KEY = "raterhubCredentialsKey_v1";
 const throttleMap = {};
 
 let authState = {
@@ -10,7 +14,14 @@ let authState = {
   csrfToken: null,
 };
 
+let cachedCredentials = null;
+
+// ============================================================
+// Auth state persistence (local)
+// ============================================================
+
 async function loadAuthFromStorage() {
+  // Load cached access + CSRF tokens so background can resume quickly.
   try {
     const stored = await chrome.storage.local.get([AUTH_KEY]);
     if (stored && stored[AUTH_KEY]) {
@@ -22,6 +33,7 @@ async function loadAuthFromStorage() {
 }
 
 async function persistAuthState() {
+  // Persist short-lived auth artifacts to avoid extra CSRF/login requests.
   try {
     await chrome.storage.local.set({ [AUTH_KEY]: authState });
   } catch (err) {
@@ -29,11 +41,62 @@ async function persistAuthState() {
   }
 }
 
+// ============================================================
+// Credential resolution and storage (sync)
+// ============================================================
+
+async function resolveLoginPayload() {
+  const creds = await loadStoredCredentials();
+  if (!creds) {
+    return { ok: false, error: "NO_CREDENTIALS" };
+  }
+
+  if (creds.refreshToken) {
+    return { ok: true, body: { refresh_token: creds.refreshToken }, mode: "refresh" };
+  }
+
+  if (creds.mode === "token" && creds.apiToken) {
+    return { ok: true, body: { token: creds.apiToken }, mode: "token" };
+  }
+
+  if (creds.email && creds.password) {
+    return { ok: true, body: { email: creds.email, password: creds.password }, mode: "password" };
+  }
+
+  return { ok: false, error: "NO_CREDENTIALS" };
+}
+
+async function loadStoredCredentials() {
+  // Retrieve and decrypt credentials from sync storage; cache in memory.
+  if (cachedCredentials) return cachedCredentials;
+  try {
+    const stored = await chrome.storage.sync.get([CREDENTIALS_KEY]);
+    if (stored && stored[CREDENTIALS_KEY]) {
+      cachedCredentials = await decryptFromStorage(stored[CREDENTIALS_KEY]);
+    }
+  } catch (err) {
+    console.warn("[RaterHubTracker] Failed to load credentials", err);
+  }
+  return cachedCredentials;
+}
+
+async function persistCredentials(creds) {
+  // Encrypt credentials for sync storage or clear them entirely.
+  cachedCredentials = creds;
+  if (!creds) {
+    await chrome.storage.sync.remove([CREDENTIALS_KEY]);
+    return;
+  }
+  const encrypted = await encryptForStorage(creds);
+  await chrome.storage.sync.set({ [CREDENTIALS_KEY]: encrypted });
+}
+
 function setLastStatus(message) {
   chrome.storage.local.set({ [STATUS_KEY]: message }).catch(() => {});
 }
 
 function throttle(key, windowMs = 750) {
+  // Simple per-key throttle to avoid hammering APIs from rapid UI events.
   const now = Date.now();
   const last = throttleMap[key] || 0;
   if (now - last < windowMs) {
@@ -42,6 +105,64 @@ function throttle(key, windowMs = 750) {
   throttleMap[key] = now;
   return { throttled: false };
 }
+
+function isInternalPage(sender) {
+  const base = chrome.runtime.getURL("");
+  return Boolean(sender?.url && sender.url.startsWith(base));
+}
+
+// ============================================================
+// Encryption helpers for stored credentials
+// ============================================================
+
+function bufferToBase64(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+}
+
+function base64ToBuffer(b64) {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+}
+
+async function getCryptoKey() {
+  const existing = await chrome.storage.local.get([CRYPTO_KEY]);
+  let rawKey = existing[CRYPTO_KEY];
+  if (!rawKey) {
+    const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+    rawKey = bufferToBase64(keyBytes.buffer);
+    await chrome.storage.local.set({ [CRYPTO_KEY]: rawKey });
+  }
+
+  const keyBuffer = base64ToBuffer(rawKey);
+  return crypto.subtle.importKey("raw", keyBuffer, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+async function encryptForStorage(obj) {
+  const encoder = new TextEncoder();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await getCryptoKey();
+  const data = encoder.encode(JSON.stringify(obj));
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data);
+  return { iv: bufferToBase64(iv.buffer), cipher: bufferToBase64(cipher) };
+}
+
+async function decryptFromStorage(record) {
+  if (!record?.iv || !record?.cipher) return null;
+  const key = await getCryptoKey();
+  const iv = new Uint8Array(base64ToBuffer(record.iv));
+  const cipher = base64ToBuffer(record.cipher);
+  try {
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
+    const decoded = new TextDecoder().decode(plain);
+    return JSON.parse(decoded);
+  } catch (err) {
+    console.warn("[RaterHubTracker] Failed to decrypt credentials", err);
+    return null;
+  }
+}
+
+// ============================================================
+// Auth: CSRF issuance and login/token caching
+// ============================================================
 
 async function fetchCsrfToken() {
   const { throttled } = throttle("csrf", 500);
@@ -73,10 +194,16 @@ async function fetchCsrfToken() {
   return { ok: false, error: "INVALID_RESPONSE" };
 }
 
-async function login() {
+async function login(options = {}) {
+  // Perform login using stored credentials or refresh token; captures new tokens.
   const { throttled } = throttle("login", 1000);
   if (throttled) {
     return { ok: false, error: "THROTTLED" };
+  }
+
+  const payload = await resolveLoginPayload();
+  if (!payload.ok) {
+    return payload;
   }
 
   if (!authState.csrfToken) {
@@ -94,14 +221,10 @@ async function login() {
         "X-CSRF-Token": authState.csrfToken || "",
       },
       credentials: "include",
-      body: JSON.stringify({
-        email: LOGIN_EMAIL,
-        password: LOGIN_PASSWORD,
-      }),
+      body: JSON.stringify(payload.body),
     });
 
     if (res.status === 400) {
-      // Likely bad CSRF token; refresh once.
       authState.csrfToken = null;
       await persistAuthState();
       const refreshed = await fetchCsrfToken();
@@ -116,40 +239,68 @@ async function login() {
           "X-CSRF-Token": authState.csrfToken || "",
         },
         credentials: "include",
-        body: JSON.stringify({
-          email: LOGIN_EMAIL,
-          password: LOGIN_PASSWORD,
-        }),
+        body: JSON.stringify(payload.body),
       });
     }
 
     if (!res.ok) {
       const text = await res.text();
       console.warn("[RaterHubTracker] Login failed", res.status, text);
-      setLastStatus(`Login failed (${res.status})`);
+      if (!options.silent) setLastStatus(`Login failed (${res.status})`);
       return { ok: false, status: res.status, error: "LOGIN_FAILED" };
     }
 
-    const data = await res.json();
-    authState.accessToken = data.access_token;
+    const data = (await res.json().catch(() => ({}))) || {};
+    authState.accessToken = data.access_token || null;
     await persistAuthState();
-    setLastStatus("Logged in");
-    return { ok: true, token: authState.accessToken };
+
+    if (data.refresh_token) {
+      const existing = (await loadStoredCredentials()) || {};
+      await persistCredentials({ ...existing, refreshToken: data.refresh_token, mode: "refresh" });
+    }
+
+    if (!options.silent) setLastStatus("Logged in");
+    return { ok: true };
   } catch (err) {
     console.error("[RaterHubTracker] Login error", err);
-    setLastStatus("Login error");
+    if (!options.silent) setLastStatus("Login error");
     return { ok: false, error: "NETWORK" };
   }
 }
 
 async function ensureAccessToken() {
+  // Guarantee an access token exists, re-running login if necessary.
   if (authState.accessToken) {
-    return { ok: true, token: authState.accessToken };
+    return { ok: true };
   }
-  return login();
+  const res = await login();
+  if (!res.ok) return res;
+  return authState.accessToken ? { ok: true } : { ok: false, error: "NO_TOKEN" };
 }
 
+async function logoutAndReset() {
+  // Clear all stored secrets and inform active tabs to reset UI state.
+  authState = { accessToken: null, csrfToken: null };
+  cachedCredentials = null;
+  await chrome.storage.local.remove([AUTH_KEY, CRYPTO_KEY]);
+  await chrome.storage.sync.remove([CREDENTIALS_KEY]);
+  setLastStatus("Logged out");
+  try {
+    const tabs = await chrome.tabs.query({ url: "https://*.raterhub.com/*" });
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, { type: "RESET_WIDGET_STATE" }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn("[RaterHubTracker] Failed to broadcast reset", err);
+  }
+}
+
+// ============================================================
+// API callers for session data and event recording
+// ============================================================
+
 async function fetchSessionSummary(sessionId) {
+  // Fetch summary for a specific session, refreshing tokens on 401s.
   const gate = await ensureAccessToken();
   if (!gate.ok) return gate;
 
@@ -159,17 +310,24 @@ async function fetchSessionSummary(sessionId) {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/summary`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${authState.accessToken}`,
-      },
-    });
+    const makeRequest = () =>
+      fetch(`${API_BASE}/sessions/${sessionId}/summary`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+      });
+
+    let res = await makeRequest();
 
     if (res.status === 401) {
       authState.accessToken = null;
       await persistAuthState();
-      return { ok: false, status: 401, error: "UNAUTHORIZED" };
+      const relog = await login({ silent: true });
+      if (!relog.ok) {
+        return { ok: false, status: 401, error: "UNAUTHORIZED" };
+      }
+      res = await makeRequest();
     }
 
     if (!res.ok) {
@@ -188,6 +346,7 @@ async function fetchSessionSummary(sessionId) {
 }
 
 async function findActiveSession() {
+  // Look up most recent active session to keep UI aligned with backend state.
   const gate = await ensureAccessToken();
   if (!gate.ok) return gate;
 
@@ -197,17 +356,24 @@ async function findActiveSession() {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/sessions/recent?limit=5`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${authState.accessToken}`,
-      },
-    });
+    const makeRequest = () =>
+      fetch(`${API_BASE}/sessions/recent?limit=5`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+      });
+
+    let res = await makeRequest();
 
     if (res.status === 401) {
       authState.accessToken = null;
       await persistAuthState();
-      return { ok: false, status: 401, error: "UNAUTHORIZED" };
+      const relog = await login({ silent: true });
+      if (!relog.ok) {
+        return { ok: false, status: 401, error: "UNAUTHORIZED" };
+      }
+      res = await makeRequest();
     }
 
     if (!res.ok) {
@@ -226,6 +392,7 @@ async function findActiveSession() {
 }
 
 async function sendEvent(eventType) {
+  // Record a timestamped event and retry authentication on 401s.
   const gate = await ensureAccessToken();
   if (!gate.ok) return gate;
 
@@ -240,19 +407,26 @@ async function sendEvent(eventType) {
   };
 
   try {
-    const res = await fetch(`${API_BASE}/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authState.accessToken}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    const makeRequest = () =>
+      fetch(`${API_BASE}/events`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+    let res = await makeRequest();
 
     if (res.status === 401) {
       authState.accessToken = null;
       await persistAuthState();
-      return { ok: false, status: 401, error: "UNAUTHORIZED" };
+      const relog = await login({ silent: true });
+      if (!relog.ok) {
+        return { ok: false, status: 401, error: "UNAUTHORIZED" };
+      }
+      res = await makeRequest();
     }
 
     if (!res.ok) {
@@ -272,11 +446,15 @@ async function sendEvent(eventType) {
   }
 }
 
+// ============================================================
+// Message router: internal actions only expose non-secret data
+// ============================================================
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message?.type) {
       case "LOGIN": {
-        const res = await login();
+        const res = await login({ silent: Boolean(message?.silent) });
         sendResponse(res);
         return;
       }
@@ -296,11 +474,72 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       case "GET_STATUS": {
+        const storedCreds = await loadStoredCredentials();
         sendResponse({
           ok: true,
           authenticated: Boolean(authState.accessToken),
+          hasCredentials: Boolean(storedCreds),
           lastStatus: message.includeLastStatus ? (await chrome.storage.local.get([STATUS_KEY]))[STATUS_KEY] : undefined,
         });
+        return;
+      }
+      case "GET_AUTH_CONFIG": {
+        if (!isInternalPage(sender)) {
+          sendResponse({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+        const creds = (await loadStoredCredentials()) || null;
+        sendResponse({ ok: true, config: creds });
+        return;
+      }
+      case "SAVE_AUTH_CONFIG": {
+        if (!isInternalPage(sender)) {
+          sendResponse({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+        const config = message.config || {};
+        if (config.mode === "password" && config.email && config.password) {
+          await persistCredentials({ mode: "password", email: config.email, password: config.password });
+          authState.accessToken = null;
+          await persistAuthState();
+          sendResponse({ ok: true });
+        } else if (config.mode === "token" && config.apiToken) {
+          await persistCredentials({ mode: "token", apiToken: config.apiToken });
+          authState.accessToken = null;
+          await persistAuthState();
+          sendResponse({ ok: true });
+        } else if (config.mode === "refresh" && config.refreshToken) {
+          await persistCredentials({ mode: "refresh", refreshToken: config.refreshToken });
+          authState.accessToken = null;
+          await persistAuthState();
+          sendResponse({ ok: true });
+        } else {
+          sendResponse({ ok: false, error: "INVALID_CONFIG" });
+        }
+        return;
+      }
+      case "REQUEST_REFRESH_TOKEN": {
+        if (!isInternalPage(sender)) {
+          sendResponse({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+        const payload = await resolveLoginPayload();
+        if (!payload.ok) {
+          sendResponse({ ok: false, error: payload.error });
+          return;
+        }
+        const res = await login({ silent: true });
+        const creds = await loadStoredCredentials();
+        sendResponse({ ok: res.ok, refreshToken: creds?.refreshToken });
+        return;
+      }
+      case "LOGOUT_RESET": {
+        if (!isInternalPage(sender) && sender?.url) {
+          sendResponse({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+        await logoutAndReset();
+        sendResponse({ ok: true });
         return;
       }
       default:

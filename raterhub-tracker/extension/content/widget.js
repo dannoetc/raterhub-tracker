@@ -579,6 +579,12 @@
 
     window.addEventListener("keydown", handleKeydown, true);
     chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === "RESET_WIDGET_STATE") {
+        hardResetSessionUI("Session: –");
+        updateUserDisplay(false);
+        setStatus("Logged out", "#6b7280");
+        return;
+      }
       if (message?.type === "SESSION_SUMMARY_RELAY" && message.summary) {
         const summary = message.summary;
         if (summary.is_active === false) {

@@ -3,7 +3,7 @@
   "name": "RaterHub Tracker",
   "description": "Floating tracker widget for RaterHub sessions backed by the RaterHub Tracker API.",
   "version": "0.9.0",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://*.raterhub.com/*",
     "https://api.raterhub.steigenga.com/*"
@@ -21,5 +21,6 @@
   "action": {
     "default_title": "RaterHub Tracker",
     "default_popup": "popup.html"
-  }
+  },
+  "options_page": "options.html"
 }

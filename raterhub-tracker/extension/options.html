@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RaterHub Tracker Options</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 24px;
+        color: #111827;
+        background: #f8fafc;
+      }
+      h1 {
+        margin-bottom: 4px;
+        color: #6d28d9;
+      }
+      .section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+        margin-bottom: 16px;
+      }
+      label {
+        font-weight: 600;
+        display: block;
+        margin-bottom: 6px;
+      }
+      input[type="email"],
+      input[type="password"],
+      input[type="text"] {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .muted {
+        color: #6b7280;
+        font-size: 13px;
+        margin-top: 4px;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      button {
+        background: #6d28d9;
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      button.secondary {
+        background: #e5e7eb;
+        color: #111827;
+      }
+      button.danger {
+        background: #dc2626;
+      }
+      .status {
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-weight: 600;
+        font-size: 13px;
+        background: #eef2ff;
+        color: #312e81;
+        margin-top: 8px;
+      }
+      .radio-group {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .stack {
+        display: grid;
+        gap: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>RaterHub Tracker</h1>
+    <div class="muted">Configure how the extension authenticates with the backend.</div>
+
+    <div class="section">
+      <label>Credential type</label>
+      <div class="radio-group">
+        <label><input type="radio" name="auth-mode" value="password" checked /> Email + Password</label>
+        <label><input type="radio" name="auth-mode" value="token" /> Personal API Token</label>
+        <label><input type="radio" name="auth-mode" value="refresh" /> Refresh Token</label>
+      </div>
+
+      <div id="password-fields" class="stack">
+        <div>
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div>
+          <label for="password">Password</label>
+          <input id="password" type="password" placeholder="••••••" autocomplete="current-password" />
+        </div>
+      </div>
+
+      <div id="token-field" class="stack" style="display: none">
+        <div>
+          <label for="api-token">Personal API token</label>
+          <input id="api-token" type="text" placeholder="rh_pat_..." autocomplete="off" />
+        </div>
+      </div>
+
+      <div id="refresh-field" class="stack" style="display: none">
+        <div>
+          <label for="refresh-token">Refresh token</label>
+          <input id="refresh-token" type="text" placeholder="Provided by backend" autocomplete="off" />
+          <div class="muted">You can request a new refresh token using your email/password if supported by the backend.</div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="save">Save credentials</button>
+        <button id="request-refresh" class="secondary">Request refresh token</button>
+        <button id="test-login" class="secondary">Test login</button>
+        <button id="logout" class="danger">Logout & reset</button>
+      </div>
+      <div id="status" class="status" style="display: none"></div>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
