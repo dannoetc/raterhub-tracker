@@ -119,6 +119,37 @@
             max-width: 100%;
         }
 
+        .sparkline-grid {
+            display: grid;
+            grid-template-columns: repeat(24, 1fr);
+            gap: 2px;
+            align-items: end;
+            height: 52px;
+            margin-top: 8px;
+        }
+
+        .sparkline-col {
+            width: 100%;
+            background: linear-gradient(180deg, #6c5ce7, #a66bff);
+            border-radius: 3px 3px 0 0;
+            min-height: 4px;
+            opacity: 0.85;
+        }
+
+        .sparkline-col.is-zero {
+            background: #e6ddff;
+            opacity: 0.6;
+            min-height: 3px;
+        }
+
+        .sparkline-axis {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
         .section-title {
             font-size: 16px;
             color: var(--accent-dark);
