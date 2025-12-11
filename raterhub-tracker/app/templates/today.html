@@ -119,6 +119,47 @@
             max-width: 100%;
         }
 
+        .hourly-activity-card {
+            background: var(--card-bg);
+            border-radius: 14px;
+            padding: 14px 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            border: 1px solid var(--border-subtle);
+            margin-bottom: 22px;
+        }
+
+        .hourly-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 6px;
+            height: 90px;
+            margin-top: 12px;
+        }
+
+        .hourly-bar {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .hourly-bar-fill {
+            width: 100%;
+            background: linear-gradient(180deg, #c2b5ff, #6c5ce7);
+            border-radius: 6px 6px 2px 2px;
+        }
+
+        .hourly-label {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .hourly-value {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
         .section-title {
             font-size: 16px;
             color: var(--accent-dark);
@@ -362,6 +403,29 @@
                 Based on average time vs target
             </div>
         </div>
+    </div>
+
+    <div class="hourly-activity-card">
+        <h2 class="section-title" style="margin-top: 0;">Hourly activity</h2>
+        <p class="section-subtitle" style="margin-bottom: 8px;">
+            Active seconds grouped by local hour (timezone: {{ user_timezone or 'UTC' }}).
+        </p>
+        {% set max_active = (summary.hourly_activity | map(attribute='active_seconds') | max) if summary.hourly_activity else 0 %}
+        {% if not max_active %}
+            <div class="empty-state" style="margin-top: 8px;">No activity recorded this day.</div>
+        {% else %}
+            <div class="hourly-bars">
+                {% for bucket in summary.hourly_activity %}
+                    {% set pct = (bucket.active_seconds / max_active * 100) if max_active else 0 %}
+                    {% set question_label = 'question' if bucket.total_questions == 1 else 'questions' %}
+                    <div class="hourly-bar" title="{{ "%02d:00" % bucket.hour }} — {{ bucket.total_questions }} {{ question_label }} answered"> 
+                        <div class="hourly-bar-fill" style="height: {{ pct }}%;"></div>
+                        <div class="hourly-label">{{ "%02d" % bucket.hour }}</div>
+                        <div class="hourly-value">{{ bucket.active_seconds | round(0) | int }}s</div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
     </div>
 
     <!-- Per-session details -->
