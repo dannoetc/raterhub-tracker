@@ -41,6 +41,12 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    password_history = relationship(
+        "PasswordHistory",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="PasswordHistory.created_at.desc()",
+    )
 
 
 class Session(Base):
@@ -114,3 +120,14 @@ class Question(Base):
 
     # Relationships
     session = relationship("Session", back_populates="questions")
+
+
+class PasswordHistory(Base):
+    __tablename__ = "password_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="password_history")

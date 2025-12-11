@@ -26,7 +26,14 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from .database import SessionLocal, engine
-from .db_models import Base, User, Session as DbSession, Event, Question
+from .db_models import (
+    Base,
+    User,
+    Session as DbSession,
+    Event,
+    Question,
+    PasswordHistory,
+)
 from .models import (
     EventIn,
     EventOut,
@@ -45,6 +52,7 @@ from .auth import (
     verify_password,
     create_access_token,
     decode_access_token,
+    validate_password_policy,
 )
 from .config import settings
 
@@ -322,6 +330,10 @@ def register_api(
     if exists:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    is_valid, message = validate_password_policy(user_in.password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=message)
+
     now = datetime.utcnow()
     user = User(
         external_id=user_in.email,
@@ -335,6 +347,9 @@ def register_api(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    db.add(PasswordHistory(user_id=user.id, password_hash=user.password_hash))
+    db.commit()
 
     token = create_access_token(user=user)
     return Token(access_token=token)
@@ -485,6 +500,9 @@ def register_web(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    db.add(PasswordHistory(user_id=user.id, password_hash=user.password_hash))
+    db.commit()
 
     token = create_access_token(user=user)
 
