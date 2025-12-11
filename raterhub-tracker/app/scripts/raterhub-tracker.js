@@ -21,6 +21,7 @@ window.addEventListener('load', function () {
     const STATE_KEY = "raterhubTrackerState_v1";
 
     let accessToken = null;
+    let csrfToken = null;
 
     // --- UI+session state ---
     let questionIndex = 0;           // what we display as "Question"
@@ -501,24 +502,62 @@ window.addEventListener('load', function () {
     // Auth & event sending
     // -----------------------------------------
 
+    async function fetchCsrfToken() {
+        try {
+            const res = await fetch(`${API_BASE}/auth/csrf`, {
+                method: "GET",
+                credentials: "include",
+            });
+            if (!res.ok) {
+                console.error("[RaterHubTracker] Failed to fetch CSRF token:", res.status);
+                return null;
+            }
+            const data = await res.json();
+            if (data && typeof data.csrf_token === "string") {
+                csrfToken = data.csrf_token;
+                return csrfToken;
+            }
+        } catch (e) {
+            console.error("[RaterHubTracker] Error fetching CSRF token:", e);
+        }
+        return null;
+    }
+
     async function login() {
         try {
             setStatus('Logging in…', '#4b5563');
-            const res = await fetch(`${API_BASE}/auth/login`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    email: LOGIN_EMAIL,
-                    password: LOGIN_PASSWORD,
-                }),
-            });
+            let attempt = 0;
+            let res;
+            while (attempt < 2) {
+                if (!csrfToken) {
+                    await fetchCsrfToken();
+                }
+                res = await fetch(`${API_BASE}/auth/login`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": csrfToken || "",
+                    },
+                    credentials: "include",
+                    body: JSON.stringify({
+                        email: LOGIN_EMAIL,
+                        password: LOGIN_PASSWORD,
+                    }),
+                });
 
-            if (!res.ok) {
-                const text = await res.text();
-                console.error("[RaterHubTracker] Login failed:", res.status, text);
-                setStatus(`Login failed (${res.status})`, '#b91c1c');
+                if (res.status === 400 && attempt === 0) {
+                    console.warn("[RaterHubTracker] CSRF token rejected, refreshing and retrying...");
+                    csrfToken = null;
+                    attempt += 1;
+                    continue;
+                }
+                break;
+            }
+
+            if (!res || !res.ok) {
+                const text = res ? await res.text() : 'no response';
+                console.error("[RaterHubTracker] Login failed:", res ? res.status : 'n/a', text);
+                setStatus(`Login failed (${res ? res.status : 'n/a'})`, '#b91c1c');
                 flashWidget('#ef4444');
                 return;
             }
