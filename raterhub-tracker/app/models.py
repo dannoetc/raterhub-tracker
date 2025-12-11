@@ -88,6 +88,7 @@ class TodaySessionItem(BaseModel):
 class HourlyActivity(BaseModel):
     hour: int
     active_seconds: float
+    total_questions: int
 
 
 class TodaySummary(BaseModel):
@@ -107,6 +108,7 @@ class TodaySummary(BaseModel):
     # Optional for backward compatibility with older templates/clients expecting this field.
     hourly_activity: list = Field(default_factory=list)
 
+    hourly_activity: list[HourlyActivity]
     sessions: list[TodaySessionItem]
 
 class Token(BaseModel):
