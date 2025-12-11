@@ -120,34 +120,24 @@
         }
 
         .sparkline-grid {
-            display: grid;
-            grid-template-columns: repeat(24, 1fr);
-            gap: 2px;
-            align-items: end;
-            height: 52px;
-            margin-top: 8px;
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
+            height: 36px;
+            margin-top: 10px;
         }
 
         .sparkline-col {
-            width: 100%;
-            background: linear-gradient(180deg, #6c5ce7, #a66bff);
-            border-radius: 3px 3px 0 0;
+            flex: 1;
+            border-radius: 6px;
+            background: linear-gradient(180deg, rgba(166, 107, 255, 0.25), rgba(255, 110, 199, 0.8));
             min-height: 4px;
-            opacity: 0.85;
         }
 
-        .sparkline-col.is-zero {
-            background: #e6ddff;
-            opacity: 0.6;
-            min-height: 3px;
-        }
-
-        .sparkline-axis {
-            display: flex;
-            justify-content: space-between;
+        .sparkline-caption {
             font-size: 11px;
             color: var(--text-muted);
-            margin-top: 4px;
+            margin-top: 6px;
         }
 
         .section-title {
@@ -361,10 +351,19 @@
             <div class="summary-value">{{ summary.total_questions or 0 }}</div>
             <div class="summary-extra">
                 Across all sessions
-                <div class="sparkline-bar">
-                    {% set q = summary.total_questions or 0 %}
-                    <div class="sparkline-fill" style="width: {{ (q if q < 40 else 40) * 2.5 }}%;"></div>
-                </div>
+                {% set hourly = summary.hourly_activity or [] %}
+                {% set max_bucket = (hourly | max) if hourly else 0 %}
+                {% if hourly and max_bucket > 0 %}
+                    <div class="sparkline-grid">
+                        {% for count in hourly %}
+                            {% set scale = (count / max_bucket * 100) if max_bucket > 0 else 0 %}
+                            <div class="sparkline-col" style="height: {{ 8 + (scale * 0.9) }}%; opacity: {{ 0.3 + (0.7 * (scale / 100)) }};"></div>
+                        {% endfor %}
+                    </div>
+                    <div class="sparkline-caption">Hourly question starts (local)</div>
+                {% else %}
+                    <div class="sparkline-caption">No hourly activity yet today</div>
+                {% endif %}
             </div>
         </div>
 

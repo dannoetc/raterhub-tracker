@@ -832,7 +832,7 @@ def build_day_summary(
         .all()
     )
 
-    hourly_buckets: List[float] = [0.0 for _ in range(24)]
+    hourly_activity = [0 for _ in range(24)]
 
     if not sessions:
         hourly_buckets = [0.0 for _ in range(24)]
@@ -848,6 +848,7 @@ def build_day_summary(
             avg_active_mmss="00:00",
             daily_pace_label="No questions",
             daily_pace_emoji="😴",
+            hourly_activity=hourly_activity,
             sessions=[],
         )
 
@@ -867,6 +868,14 @@ def build_day_summary(
 
         # Filter ghost questions
         qs = [q for q in qs_all if not is_ghost_question(q)]
+
+        for q in qs:
+            q_local_start = to_user_local(q.started_at, user)
+            if not q_local_start:
+                continue
+            if q_local_start < local_start or q_local_start >= local_end:
+                continue
+            hourly_activity[q_local_start.hour] += 1
 
         if not qs:
             items.append(
@@ -941,6 +950,7 @@ def build_day_summary(
         avg_active_mmss=format_hhmm_or_mmss_for_dashboard(avg_active_day),
         daily_pace_label=daily_pace["pace_label"],
         daily_pace_emoji=daily_pace["pace_emoji"],
+        hourly_activity=hourly_activity,
         sessions=items,
     )
 
