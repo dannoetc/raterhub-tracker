@@ -36,6 +36,7 @@ from .models import (
     UserCreate,
     UserLogin,
     Token,
+    HourlyActivity,
 )
 from .auth import (
     get_password_hash,
@@ -831,6 +832,8 @@ def build_day_summary(
         .all()
     )
 
+    hourly_buckets: List[float] = [0.0 for _ in range(24)]
+
     if not sessions:
         daily_pace = compute_pace(0.0, 0.0)
         return TodaySummary(
@@ -846,6 +849,9 @@ def build_day_summary(
             daily_pace_emoji=daily_pace["pace_emoji"],
             daily_pace_score=daily_pace["score"],
             daily_pace_ratio=daily_pace["ratio"],
+            hourly_activity=[
+                HourlyActivity(hour=hour, active_seconds=0.0) for hour in range(24)
+            ],
             sessions=[],
         )
 
@@ -898,6 +904,12 @@ def build_day_summary(
         total_active_all += total_active
         total_target_minutes_weighted += target_minutes * count
 
+        for q in qs:
+            started_local = to_user_local(q.started_at, user)
+            if started_local is None:
+                continue
+            hourly_buckets[started_local.hour] += q.active_seconds or 0.0
+
         items.append(
             TodaySessionItem(
                 session_id=s.public_id,
@@ -924,6 +936,11 @@ def build_day_summary(
     )
     daily_pace = compute_pace(avg_active_day, avg_target_minutes)
 
+    hourly_activity = [
+        HourlyActivity(hour=hour, active_seconds=seconds)
+        for hour, seconds in enumerate(hourly_buckets)
+    ]
+
     return TodaySummary(
         date=local_start,  # stored as local midnight in user's TZ
         user_external_id=user.email,
@@ -937,6 +954,7 @@ def build_day_summary(
         daily_pace_emoji=daily_pace["pace_emoji"],
         daily_pace_score=daily_pace["score"],
         daily_pace_ratio=daily_pace["ratio"],
+        hourly_activity=hourly_activity,
         sessions=items,
     )
 
