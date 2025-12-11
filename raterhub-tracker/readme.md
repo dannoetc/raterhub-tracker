@@ -131,9 +131,7 @@ The following items remain before the application is considered production-ready
 - [ ] Improve error display in HTML login/register forms
 
 ### 🔧 Deployment & Tooling
-- [ ] Add `.dockerignore`
 - [ ] Add sample `nginx` config for SSL proxying
-- [ ] Add Makefile for setup/dev/test helpers
 - [ ] Add GitHub Actions CI for linting/tests
 
 ### 📚 Documentation

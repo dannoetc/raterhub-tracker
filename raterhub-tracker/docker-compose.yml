@@ -1,33 +1,40 @@
-# Use official Python base image
-FROM python:3.12-slim
+version: "3.9"
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    APP_HOME=/app
+services:
+  db:
+    image: postgres:16
+    container_name: raterhub-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: raterhub
+      POSTGRES_PASSWORD: super-secret-db-password
+      POSTGRES_DB: raterhub
+    volumes:
+      - raterhub_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raterhub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-# Set working directory
-WORKDIR $APP_HOME
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: raterhub-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://raterhub:super-secret-db-password@db:5432/raterhub
+    entrypoint: ["/app/entrypoint.sh"]
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libpq-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Copy the rest of the application
-COPY . .
-
-# Expose FastAPI default port
-EXPOSE 8000
-
-# Use uvicorn to run the FastAPI app
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+volumes:
+  raterhub_pgdata:

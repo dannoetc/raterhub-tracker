@@ -85,6 +85,12 @@ class TodaySessionItem(BaseModel):
     score: int
 
 
+class HourlyActivity(BaseModel):
+    hour: int
+    active_seconds: float
+    total_questions: int
+
+
 class TodaySummary(BaseModel):
     date: datetime
     user_external_id: str
@@ -94,6 +100,12 @@ class TodaySummary(BaseModel):
     total_active_seconds: float
     total_active_mmss: str
 
+    avg_active_seconds: float
+    avg_active_mmss: str
+    daily_pace_label: str
+    daily_pace_emoji: str
+
+    hourly_activity: list[HourlyActivity]
     sessions: list[TodaySessionItem]
 
 class Token(BaseModel):
