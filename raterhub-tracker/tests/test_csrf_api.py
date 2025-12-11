@@ -162,3 +162,27 @@ async def test_api_login_rejects_invalid_csrf_token():
     )
     assert status == 400
     assert body["detail"] == "Invalid or missing CSRF token"
+
+
+@pytest.mark.anyio
+async def test_csrf_cookie_allows_cross_site_requests():
+    client = JsonASGIClient(app)
+
+    status, headers, body = await client.get_json("/auth/csrf")
+    assert status == 200
+    assert body["csrf_token"]
+
+    set_cookie_headers = [value.decode() for name, value in headers if name.lower() == b"set-cookie"]
+    assert set_cookie_headers, "CSRF cookie not set"
+
+    jar = SimpleCookie()
+    for header in set_cookie_headers:
+        jar.load(header)
+
+    assert "csrf_token" in jar
+    morsel = jar["csrf_token"]
+
+    # SameSite=None is required for the userscript on raterhub.com to send the cookie to the API origin.
+    assert morsel["samesite"].lower() == "none"
+    # Depending on Python version / cookie parser, the secure flag may parse as bool or string.
+    assert str(morsel["secure"]).lower() == "true"

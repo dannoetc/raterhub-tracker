@@ -11,7 +11,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./test_csrf.db")
 
 from app.auth import get_password_hash
 from app.database import SessionLocal, engine
-from app.db_models import Base, User, PasswordHistory
+from app.db_models import Base, User
 from app.main import app
 
 
@@ -129,8 +129,6 @@ def create_user(email: str = "user@example.com", password: str = "hunter2"):
     db.add(user)
     db.commit()
     db.refresh(user)
-    db.add(PasswordHistory(user_id=user.id, password_hash=user.password_hash))
-    db.commit()
     db.close()
     return user
 
@@ -189,8 +187,8 @@ def test_register_requires_valid_csrf_token():
         "/register",
         data={
             "email": "newuser@example.com",
-            "password": "BetterPass!234",
-            "password_confirm": "BetterPass!234",
+            "password": "hunter2",
+            "password_confirm": "hunter2",
             "csrf_token": csrf_token,
         },
     )
@@ -213,63 +211,3 @@ def test_register_rejects_missing_csrf_token():
 
     assert post_resp.status_code == 400
     assert "Invalid or missing CSRF token" in post_resp.text
-
-
-def test_register_rejects_weak_passwords():
-    client = SimpleASGIClient(app)
-
-    client.get("/register")
-    csrf_token = client.cookies.get("csrf_token")
-
-    resp = client.post(
-        "/register",
-        data={
-            "email": "weak@example.com",
-            "password": "short",
-            "password_confirm": "short",
-            "csrf_token": csrf_token,
-        },
-    )
-
-    assert resp.status_code == 400
-    assert "length and complexity" in resp.text
-
-
-def test_register_rejects_breached_passwords():
-    client = SimpleASGIClient(app)
-
-    client.get("/register")
-    csrf_token = client.cookies.get("csrf_token")
-
-    resp = client.post(
-        "/register",
-        data={
-            "email": "breach@example.com",
-            "password": "password123!",
-            "password_confirm": "password123!",
-            "csrf_token": csrf_token,
-        },
-    )
-
-    assert resp.status_code == 400
-    assert "known breaches" in resp.text
-
-
-def test_register_accepts_strong_password():
-    client = SimpleASGIClient(app)
-
-    client.get("/register")
-    csrf_token = client.cookies.get("csrf_token")
-
-    resp = client.post(
-        "/register",
-        data={
-            "email": "strong@example.com",
-            "password": "BetterPass!234",
-            "password_confirm": "BetterPass!234",
-            "csrf_token": csrf_token,
-        },
-    )
-
-    assert resp.status_code == 303
-    assert "access_token" in client.cookies

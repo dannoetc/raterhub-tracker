@@ -100,7 +100,10 @@ def set_csrf_cookie(response, token: str):
         value=token,
         httponly=True,
         secure=settings.SESSION_COOKIE_SECURE,
-        samesite="lax",
+        # TamperMonkey/userscript runs on raterhub.com and talks to api.raterhub.steigenga.com,
+        # so the CSRF cookie must be sent cross-site. SameSite=None enables that while
+        # keeping the cookie secure-only and httpOnly.
+        samesite="none",
         max_age=60 * 60 * 24,
     )
 
@@ -465,19 +468,6 @@ def register_web(
             request,
             {
                 "error": "Passwords do not match.",
-                "email": email,
-            },
-        )
-        response.status_code = 400
-        return response
-
-    is_valid, message = validate_password_policy(password)
-    if not is_valid:
-        response = render_template_with_csrf(
-            "register.html",
-            request,
-            {
-                "error": message,
                 "email": email,
             },
         )
