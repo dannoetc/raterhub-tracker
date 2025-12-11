@@ -165,6 +165,21 @@
             margin-top: 6px;
         }
 
+        .sparkline-tooltip {
+            position: absolute;
+            padding: 6px 8px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+            font-size: 12px;
+            color: var(--text-main);
+            pointer-events: none;
+            transform: translate(-50%, -110%);
+            white-space: nowrap;
+            z-index: 10;
+        }
+
         .section-title {
             font-size: 16px;
             color: var(--accent-dark);
@@ -412,7 +427,8 @@
     </div>
 
     {% set hourly = summary.hourly_activity or [] %}
-    {% set max_bucket = (hourly | max) if hourly else 0 %}
+    {% set hourly_totals = hourly | map(attribute='total_questions') | list %}
+    {% set max_bucket = (hourly_totals | max) if hourly_totals else 0 %}
     <div class="wide-card">
         <div class="summary-label">Hourly Activity</div>
         <div class="summary-value" style="font-size: 18px; color: var(--text-muted); font-weight: 500;">
@@ -420,11 +436,18 @@
         </div>
         {% if hourly and max_bucket > 0 %}
             <div class="sparkline-grid large">
-                {% for count in hourly %}
-                    {% set scale = (count / max_bucket * 100) if max_bucket > 0 else 0 %}
-                    <div class="sparkline-col" style="height: {{ 10 + (scale * 0.9) }}%; opacity: {{ 0.3 + (0.7 * (scale / 100)) }};"></div>
+                {% for bucket in hourly %}
+                    {% set scale = (bucket.total_questions / max_bucket * 100) if max_bucket > 0 else 0 %}
+                    <div
+                        class="sparkline-col"
+                        data-hour="{{ bucket.hour }}"
+                        data-bucket-start="{{ bucket.bucket_start.isoformat() if bucket.bucket_start else '' }}"
+                        data-total-questions="{{ bucket.total_questions }}"
+                        style="height: {{ 10 + (scale * 0.9) }}%; opacity: {{ 0.3 + (0.7 * (scale / 100)) }};"
+                    ></div>
                 {% endfor %}
             </div>
+            <div id="sparkline-tooltip" class="sparkline-tooltip" style="display: none;"></div>
             <div class="sparkline-caption">Peak hour shows as the tallest column</div>
         {% else %}
             <div class="sparkline-caption" style="margin-top: 8px;">No hourly activity yet today</div>
@@ -514,5 +537,45 @@
         </div>
     {% endif %}
 </div>
+
+<script>
+    (function() {
+        const tooltip = document.getElementById('sparkline-tooltip');
+        const columns = document.querySelectorAll('.sparkline-col');
+
+        if (!tooltip || !columns.length) return;
+
+        function formatLocalTime(isoString) {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        }
+
+        function updateTooltipPosition(event) {
+            tooltip.style.left = `${event.pageX}px`;
+            tooltip.style.top = `${event.pageY}px`;
+        }
+
+        columns.forEach((col) => {
+            col.addEventListener('mouseenter', (event) => {
+                const startIso = col.dataset.bucketStart || '';
+                const count = Number(col.dataset.totalQuestions || '0');
+                const timeLabel = formatLocalTime(startIso);
+
+                const countLabel = `${count} question${count === 1 ? '' : 's'}`;
+                tooltip.textContent = timeLabel ? `${timeLabel} · ${countLabel}` : countLabel;
+                tooltip.style.display = 'block';
+                updateTooltipPosition(event);
+            });
+
+            col.addEventListener('mousemove', updateTooltipPosition);
+
+            col.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
+        });
+    })();
+</script>
 </body>
 </html>

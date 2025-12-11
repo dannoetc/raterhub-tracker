@@ -26,6 +26,7 @@ def test_build_day_summary_populates_hourly_buckets():
 
     assert ten_am_bucket.total_questions == 1
     assert ten_am_bucket.active_seconds == 45.0
+    assert ten_am_bucket.bucket_start.hour == 10
     assert summary.total_questions == 1
     assert summary.total_active_seconds == 45.0
     assert summary.total_sessions == 1
