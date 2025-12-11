@@ -88,7 +88,6 @@ class TodaySessionItem(BaseModel):
 class HourlyActivity(BaseModel):
     hour: int
     active_seconds: float
-    total_questions: int
 
 
 class TodaySummary(BaseModel):
@@ -105,7 +104,9 @@ class TodaySummary(BaseModel):
     daily_pace_label: str
     daily_pace_emoji: str
 
-    hourly_activity: list[HourlyActivity]
+    # Optional for backward compatibility with older templates/clients expecting this field.
+    hourly_activity: list = Field(default_factory=list)
+
     sessions: list[TodaySessionItem]
 
 class Token(BaseModel):

@@ -836,10 +836,7 @@ def build_day_summary(
         .all()
     )
 
-    hourly_activity_buckets = [
-        {"hour": hour, "active_seconds": 0.0, "total_questions": 0}
-        for hour in range(24)
-    ]
+    hourly_activity = [0 for _ in range(24)]
 
     if not sessions:
         hourly_buckets = [0.0 for _ in range(24)]
@@ -853,11 +850,9 @@ def build_day_summary(
             total_active_mmss="00:00",
             avg_active_seconds=0.0,
             avg_active_mmss="00:00",
-            daily_pace_label=daily_pace["pace_label"],
-            daily_pace_emoji=daily_pace["pace_emoji"],
-            daily_pace_score=daily_pace["score"],
-            daily_pace_ratio=daily_pace["ratio"],
-            hourly_activity=[HourlyActivity(**bucket) for bucket in hourly_activity_buckets],
+            daily_pace_label="No questions",
+            daily_pace_emoji="😴",
+            hourly_activity=hourly_activity,
             sessions=[],
         )
 
@@ -918,14 +913,6 @@ def build_day_summary(
         total_active_all += total_active
         total_target_minutes_weighted += target_minutes * count
 
-        for q in qs:
-            started_local = to_user_local(q.started_at, user)
-            if started_local is None:
-                continue
-            bucket = hourly_activity_buckets[started_local.hour]
-            bucket["active_seconds"] += q.active_seconds or 0.0
-            bucket["total_questions"] += 1
-
         items.append(
             TodaySessionItem(
                 session_id=s.public_id,
@@ -956,15 +943,6 @@ def build_day_summary(
         else {"pace_label": "No questions", "pace_emoji": "😴"}
     )
 
-    hourly_activity = [
-        HourlyActivity(
-            hour=hour,
-            active_seconds=seconds,
-            total_questions=hourly_question_counts[hour],
-        )
-        for hour, seconds in enumerate(hourly_buckets)
-    ]
-
     return TodaySummary(
         date=local_start,  # stored as local midnight in user's TZ
         user_external_id=user.email,
@@ -976,9 +954,7 @@ def build_day_summary(
         avg_active_mmss=format_hhmm_or_mmss_for_dashboard(avg_active_day),
         daily_pace_label=daily_pace["pace_label"],
         daily_pace_emoji=daily_pace["pace_emoji"],
-        daily_pace_score=daily_pace["score"],
-        daily_pace_ratio=daily_pace["ratio"],
-        hourly_activity=[HourlyActivity(**bucket) for bucket in hourly_activity_buckets],
+        hourly_activity=hourly_activity,
         sessions=items,
     )
 
