@@ -42,14 +42,25 @@
             font-weight: 600;
             color: #4b3b86;
         }
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
         .nav-right a {
-            margin-left: 12px;
             font-size: 13px;
             color: #6c5ce7;
             text-decoration: none;
         }
         .nav-right a:hover {
             text-decoration: underline;
+        }
+        .nav-user {
+            font-size: 12px;
+            color: #4b3b86;
+            background: #e9e3ff;
+            padding: 6px 10px;
+            border-radius: 999px;
         }
 
         header {
@@ -81,6 +92,15 @@
             padding: 14px 16px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.06);
             border: 1px solid var(--border-subtle);
+        }
+
+        .wide-card {
+            background: var(--card-bg);
+            border-radius: 14px;
+            padding: 16px 18px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            border: 1px solid var(--border-subtle);
+            margin-bottom: 18px;
         }
 
         .summary-label {
@@ -316,9 +336,10 @@
         <span class="nav-logo">💜 RaterHub Tracker</span>
     </div>
     <div class="nav-right">
+        <span class="nav-user">Logged in as {{ current_user_email or 'Unknown user' }}</span>
         <a href="/dashboard/today">Today</a>
         <a href="/admin/dashboard">Admin</a>
-		<a href="/profile">Preferences</a>
+                <a href="/profile">Preferences</a>
         <a href="/logout">Logout</a>
     </div>
 </div>
@@ -331,7 +352,7 @@
         </p>
     </header>
 
-    <form method="get" action="/dashboard/today" style="margin: 8px 0 18px 0;">
+    <form method="get" action="/dashboard/today" style="margin: 8px 0 6px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
         <label style="font-size: 13px; color: #7a748f; margin-right: 8px;">
             View date:
             <input
@@ -341,6 +362,9 @@
                 style="padding: 4px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px;"
             >
         </label>
+        <span style="font-size: 12px; color: #4b3b86; background: #f0eaff; padding: 6px 10px; border-radius: 8px;">
+            Timezone: {{ user_timezone or 'UTC' }}
+        </span>
         <button
             type="submit"
             style="
@@ -356,6 +380,7 @@
             Go
         </button>
     </form>
+    <p class="subtitle" style="margin-top: 0;">Times shown in {{ user_timezone or 'UTC' }}.</p>
 
     <!-- Top summary cards -->
     <div class="summary-grid">
@@ -372,10 +397,6 @@
             <div class="summary-value">{{ summary.total_questions or 0 }}</div>
             <div class="summary-extra">
                 Across all sessions
-                <div class="sparkline-bar">
-                    {% set q = summary.total_questions or 0 %}
-                    <div class="sparkline-fill" style="width: {{ (q if q < 40 else 40) * 2.5 }}%;"></div>
-                </div>
             </div>
         </div>
 
@@ -396,7 +417,7 @@
         </div>
 
         <div class="summary-card">
-            <div class="summary-label">Daily pace vs target</div>
+            <div class="summary-label">Daily Pace</div>
             <div class="summary-value">
                 <span class="pace-chip">{{ summary.daily_pace_emoji }} {{ summary.daily_pace_label }}</span>
             </div>

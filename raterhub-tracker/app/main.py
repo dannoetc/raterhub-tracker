@@ -36,6 +36,7 @@ from .models import (
     UserCreate,
     UserLogin,
     Token,
+    HourlyActivity,
 )
 from .auth import (
     get_password_hash,
@@ -793,7 +794,11 @@ def dashboard_session(
     summary = build_session_summary(db, current_user, session_public_id)
     return templates.TemplateResponse(
         "session.html",
-        {"request": request, "summary": summary},
+        {
+            "request": request,
+            "summary": summary,
+            "current_user_email": getattr(current_user, "email", None),
+        },
     )
 
 # ============================================================
@@ -831,7 +836,13 @@ def build_day_summary(
         .all()
     )
 
+    hourly_activity_buckets = [
+        {"hour": hour, "active_seconds": 0.0, "total_questions": 0}
+        for hour in range(24)
+    ]
+
     if not sessions:
+        hourly_buckets = [0.0 for _ in range(24)]
         daily_pace = compute_pace(0.0, 0.0)
         return TodaySummary(
             date=local_start,  # report date as local midnight
@@ -846,6 +857,7 @@ def build_day_summary(
             daily_pace_emoji=daily_pace["pace_emoji"],
             daily_pace_score=daily_pace["score"],
             daily_pace_ratio=daily_pace["ratio"],
+            hourly_activity=[HourlyActivity(**bucket) for bucket in hourly_activity_buckets],
             sessions=[],
         )
 
@@ -865,6 +877,14 @@ def build_day_summary(
 
         # Filter ghost questions
         qs = [q for q in qs_all if not is_ghost_question(q)]
+
+        for q in qs:
+            q_local_start = to_user_local(q.started_at, user)
+            if not q_local_start:
+                continue
+            if q_local_start < local_start or q_local_start >= local_end:
+                continue
+            hourly_activity[q_local_start.hour] += 1
 
         if not qs:
             items.append(
@@ -898,6 +918,14 @@ def build_day_summary(
         total_active_all += total_active
         total_target_minutes_weighted += target_minutes * count
 
+        for q in qs:
+            started_local = to_user_local(q.started_at, user)
+            if started_local is None:
+                continue
+            bucket = hourly_activity_buckets[started_local.hour]
+            bucket["active_seconds"] += q.active_seconds or 0.0
+            bucket["total_questions"] += 1
+
         items.append(
             TodaySessionItem(
                 session_id=s.public_id,
@@ -922,7 +950,20 @@ def build_day_summary(
         if total_questions_all
         else 0.0
     )
-    daily_pace = compute_pace(avg_active_day, avg_target_minutes)
+    daily_pace = (
+        compute_pace(avg_active_day, avg_target_minutes)
+        if total_questions_all
+        else {"pace_label": "No questions", "pace_emoji": "😴"}
+    )
+
+    hourly_activity = [
+        HourlyActivity(
+            hour=hour,
+            active_seconds=seconds,
+            total_questions=hourly_question_counts[hour],
+        )
+        for hour, seconds in enumerate(hourly_buckets)
+    ]
 
     return TodaySummary(
         date=local_start,  # stored as local midnight in user's TZ
@@ -937,6 +978,7 @@ def build_day_summary(
         daily_pace_emoji=daily_pace["pace_emoji"],
         daily_pace_score=daily_pace["score"],
         daily_pace_ratio=daily_pace["ratio"],
+        hourly_activity=[HourlyActivity(**bucket) for bucket in hourly_activity_buckets],
         sessions=items,
     )
 
@@ -998,6 +1040,7 @@ def dashboard_today(
             "summary": summary,
             "selected_date": selected_date_str,
             "user_timezone": getattr(current_user, "timezone", None),
+            "current_user_email": getattr(current_user, "email", None),
         },
     )
 
