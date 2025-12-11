@@ -836,10 +836,17 @@ def build_day_summary(
         .all()
     )
 
-    hourly_activity = [0 for _ in range(24)]
+    hourly_activity = [
+        HourlyActivity(
+            hour=h,
+            total_questions=0,
+            active_seconds=0.0,
+            bucket_start=local_start + timedelta(hours=h),
+        )
+        for h in range(24)
+    ]
 
     if not sessions:
-        hourly_buckets = [0.0 for _ in range(24)]
         daily_pace = compute_pace(0.0, 0.0)
         return TodaySummary(
             date=local_start,  # report date as local midnight
@@ -879,7 +886,9 @@ def build_day_summary(
                 continue
             if q_local_start < local_start or q_local_start >= local_end:
                 continue
-            hourly_activity[q_local_start.hour] += 1
+            bucket = hourly_activity[q_local_start.hour]
+            bucket.total_questions += 1
+            bucket.active_seconds += q.active_seconds or 0.0
 
         if not qs:
             items.append(
