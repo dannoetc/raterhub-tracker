@@ -344,6 +344,30 @@
                 Sum of focused time on tasks (pauses excluded)
             </div>
         </div>
+
+        <div class="summary-card">
+            <div class="summary-label">Avg Time / Question</div>
+            <div class="summary-value">{{ summary.avg_active_mmss }}</div>
+            <div class="summary-extra">
+                Across all questions today
+            </div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-label">Daily Score</div>
+            <div class="summary-value">
+                {% set score = summary.daily_score or 0 %}
+                <span class="score-pill
+                    {% if score >= 80 %}score-good
+                    {% elif score >= 50 %}score-mid
+                    {% else %}score-bad
+                    {% endif %}
+                ">{{ score }}/100</span>
+            </div>
+            <div class="summary-extra">
+                Weighted by question count
+            </div>
+        </div>
     </div>
 
     <!-- Per-session details -->

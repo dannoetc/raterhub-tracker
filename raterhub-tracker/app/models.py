@@ -94,6 +94,10 @@ class TodaySummary(BaseModel):
     total_active_seconds: float
     total_active_mmss: str
 
+    avg_active_seconds: float
+    avg_active_mmss: str
+    daily_score: int
+
     sessions: list[TodaySessionItem]
 
 class Token(BaseModel):
