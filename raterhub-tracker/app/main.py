@@ -334,6 +334,7 @@ def login_web(
         key="access_token",
         value=token,
         httponly=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=60 * 60 * 24,
     )
@@ -409,6 +410,7 @@ def register_web(
         key="access_token",
         value=token,
         httponly=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=60 * 60 * 24,
     )
@@ -418,14 +420,22 @@ def register_web(
 @app.get("/logout")
 def logout(request: Request):
     response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie(key="access_token", samesite="lax")
+    response.delete_cookie(
+        key="access_token",
+        samesite="lax",
+        secure=not settings.DEBUG,
+    )
     return response
 
 
 @app.post("/logout")
 def logout_post(request: Request):
     response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie(key="access_token", samesite="lax")
+    response.delete_cookie(
+        key="access_token",
+        samesite="lax",
+        secure=not settings.DEBUG,
+    )
     return response
 
 # ============================================================

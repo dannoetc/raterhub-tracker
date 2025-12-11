@@ -7,12 +7,14 @@ class Settings:
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
     # JWT
-    SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
+    SECRET_KEY = os.getenv("SECRET_KEY")
+    if not SECRET_KEY:
+        raise ValueError("SECRET_KEY environment variable must be set")
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
 
     # Database
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
-    
+
     # Templates
     TEMPLATES_DIR = str(Path(__file__).resolve().parent / "templates") + "/"
 
