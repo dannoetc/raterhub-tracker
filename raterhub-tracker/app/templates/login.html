@@ -96,6 +96,7 @@
     {% endif %}
 
     <form method="post" action="/login">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label for="email">Email</label>
         <input id="email" type="email" name="email" value="melissa@example.com" required>
 

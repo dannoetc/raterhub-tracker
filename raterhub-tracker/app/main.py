@@ -1,3 +1,5 @@
+import hmac
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from zoneinfo import ZoneInfo
@@ -75,6 +77,85 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 security = HTTPBearer(auto_error=False)  # allow missing header, fallback to cookie
+
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "x-csrf-token"
+
+
+def _csrf_signature(nonce: str, issued_at: int) -> str:
+    message = f"{nonce}:{issued_at}".encode()
+    return hmac.new(settings.SECRET_KEY.encode(), message, "sha256").hexdigest()
+
+
+def generate_csrf_token(now: Optional[datetime] = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    issued_at = int(now.timestamp())
+    nonce = secrets.token_urlsafe(32)
+    signature = _csrf_signature(nonce, issued_at)
+    return f"{nonce}:{issued_at}:{signature}"
+
+
+def set_csrf_cookie(response, token: str):
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.SESSION_COOKIE_SECURE,
+        # TamperMonkey/userscript runs on raterhub.com and talks to api.raterhub.steigenga.com,
+        # so the CSRF cookie must be sent cross-site. SameSite=None enables that while
+        # keeping the cookie secure-only and httpOnly.
+        samesite="none",
+        max_age=60 * 60 * 24,
+    )
+
+
+def render_template_with_csrf(template_name: str, request: Request, context: dict):
+    token = generate_csrf_token()
+    merged_context = {"request": request, "csrf_token": token, **context}
+    response = templates.TemplateResponse(template_name, merged_context)
+    set_csrf_cookie(response, token)
+    return response
+
+
+def _is_valid_csrf_token_value(token: str, max_age_seconds: int = 60 * 60 * 24) -> bool:
+    parts = token.split(":")
+    if len(parts) != 3:
+        return False
+
+    nonce, issued_at_raw, signature = parts
+    try:
+        issued_at = int(issued_at_raw)
+    except ValueError:
+        return False
+
+    expected_signature = _csrf_signature(nonce, issued_at)
+    if not hmac.compare_digest(expected_signature, signature):
+        return False
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if issued_at < now_ts - max_age_seconds:
+        return False
+
+    return True
+
+
+def validate_csrf(request: Request, provided_token: Optional[str]) -> bool:
+    if not provided_token or not _is_valid_csrf_token_value(provided_token):
+        return False
+
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
+    if cookie_token and not hmac.compare_digest(cookie_token, provided_token):
+        return False
+
+    return True
+
+
+@app.get("/auth/csrf")
+def issue_csrf_token(request: Request):
+    token = generate_csrf_token()
+    response = JSONResponse({"csrf_token": token})
+    set_csrf_cookie(response, token)
+    return response
 
 # ============================================================
 # DB dependency
@@ -269,6 +350,9 @@ def root(
 def register_api(
     request: Request, user_in: UserCreate, db: OrmSession = Depends(get_db)
 ):
+    if not validate_csrf(request, request.headers.get(CSRF_HEADER_NAME)):
+        raise HTTPException(status_code=400, detail="Invalid or missing CSRF token")
+
     exists = db.query(User).filter(User.email == user_in.email).first()
     if exists:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -293,6 +377,9 @@ def register_api(
 @limiter.limit("5/minute")
 @app.post("/auth/login", response_model=Token)
 def login_api(request: Request, user_in: UserLogin, db: OrmSession = Depends(get_db)):
+    if not validate_csrf(request, request.headers.get(CSRF_HEADER_NAME)):
+        raise HTTPException(status_code=400, detail="Invalid or missing CSRF token")
+
     user = db.query(User).filter(User.email == user_in.email).first()
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -312,23 +399,35 @@ def login_api(request: Request, user_in: UserLogin, db: OrmSession = Depends(get
 
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return render_template_with_csrf("login.html", request, {})
 
 
 @app.post("/login")
 def login_web(
     request: Request,
+    csrf_token: Optional[str] = Form(None),
     email: str = Form(...),
     password: str = Form(...),
     db: OrmSession = Depends(get_db),
 ):
+    if not validate_csrf(request, csrf_token):
+        response = render_template_with_csrf(
+            "login.html",
+            request,
+            {"error": "Invalid or missing CSRF token.", "email": email},
+        )
+        response.status_code = 400
+        return response
+
     user = db.query(User).filter(User.email == email).first()
     if not user or not user.password_hash or not verify_password(password, user.password_hash):
-        return templates.TemplateResponse(
+        response = render_template_with_csrf(
             "login.html",
-            {"request": request, "error": "Invalid email or password", "email": email},
-            status_code=400,
+            request,
+            {"error": "Invalid email or password", "email": email},
         )
+        response.status_code = 400
+        return response
 
     token = create_access_token(user=user)
 
@@ -349,15 +448,17 @@ def register_form(request: Request):
     """
     Show a simple registration form for creating a local account.
     """
-    return templates.TemplateResponse(
+    return render_template_with_csrf(
         "register.html",
-        {"request": request},
+        request,
+        {},
     )
 
 
 @app.post("/register")
 def register_web(
     request: Request,
+    csrf_token: Optional[str] = Form(None),
     email: str = Form(...),
     password: str = Form(...),
     password_confirm: str = Form(...),
@@ -369,28 +470,42 @@ def register_web(
     - Ensures email is not already registered
     - Creates user, logs them in, sets cookie
     """
-    if password != password_confirm:
-        return templates.TemplateResponse(
+    if not validate_csrf(request, csrf_token):
+        response = render_template_with_csrf(
             "register.html",
+            request,
             {
-                "request": request,
+                "error": "Invalid or missing CSRF token.",
+                "email": email,
+            },
+        )
+        response.status_code = 400
+        return response
+
+    if password != password_confirm:
+        response = render_template_with_csrf(
+            "register.html",
+            request,
+            {
                 "error": "Passwords do not match.",
                 "email": email,
             },
-            status_code=400,
         )
+        response.status_code = 400
+        return response
 
     existing = db.query(User).filter(User.email == email).first()
     if existing:
-        return templates.TemplateResponse(
+        response = render_template_with_csrf(
             "register.html",
+            request,
             {
-                "request": request,
                 "error": "That email is already registered.",
                 "email": email,
             },
-            status_code=400,
         )
+        response.status_code = 400
+        return response
 
     now = datetime.utcnow()
     user = User(
