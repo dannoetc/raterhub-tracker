@@ -839,12 +839,16 @@ def build_day_summary(
             total_questions=0,
             total_active_seconds=0.0,
             total_active_mmss="00:00",
+            avg_active_seconds=0.0,
+            avg_active_mmss="00:00",
+            daily_score=0,
             sessions=[],
         )
 
     total_sessions = 0
     total_questions_all = 0
     total_active_all = 0.0
+    total_score_weighted = 0.0
     items: List[TodaySessionItem] = []
 
     for s in sessions:
@@ -887,6 +891,7 @@ def build_day_summary(
 
         total_questions_all += count
         total_active_all += total_active
+        total_score_weighted += pace["score"] * count
 
         items.append(
             TodaySessionItem(
@@ -904,6 +909,15 @@ def build_day_summary(
             )
         )
 
+    avg_active_day = (
+        total_active_all / total_questions_all if total_questions_all else 0.0
+    )
+    daily_score = (
+        round(total_score_weighted / total_questions_all)
+        if total_questions_all
+        else 0
+    )
+
     return TodaySummary(
         date=local_start,  # stored as local midnight in user's TZ
         user_external_id=user.email,
@@ -911,6 +925,9 @@ def build_day_summary(
         total_questions=total_questions_all,
         total_active_seconds=total_active_all,
         total_active_mmss=format_hhmm_or_mmss_for_dashboard(total_active_all),
+        avg_active_seconds=avg_active_day,
+        avg_active_mmss=format_hhmm_or_mmss_for_dashboard(avg_active_day),
+        daily_score=daily_score,
         sessions=items,
     )
 
