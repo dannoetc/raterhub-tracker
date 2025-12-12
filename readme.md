@@ -167,6 +167,23 @@ The script is idempotent and can be re-run safely; it only creates the
 `report_audit_logs` table and missing `users.timezone`/`users.wants_report_emails`
 columns when they are absent.
 
+### PDF rendering options
+
+PDF exports prefer WeasyPrint for full HTML rendering. If you see raw HTML or CSS
+in the generated PDF, install WeasyPrint's system dependencies so the renderer
+can load fonts and CSS correctly (Debian/Ubuntu example):
+
+```bash
+apt-get update && apt-get install -y libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info
+```
+
+When those libraries are unavailable, the service falls back to a text-only PDF
+that strips tags and styling. If you need pixel-perfect HTML output in a
+minimal environment, you can also replace the `_weasyprint_render` helper in
+`app/services/report_exports.py` with a `wkhtmltopdf` or headless-Chromium
+command that writes PDF bytes to stdout—the rest of the code simply expects the
+rendered bytes.
+
 ---
 
 ## 🔐 Environment Configuration (`.env`)
