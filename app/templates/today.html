@@ -451,30 +451,6 @@
             Go
         </button>
     </form>
-    <p class="subtitle" style="margin-top: 0;">Times shown in {{ user_timezone or 'UTC' }}.</p>
-
-    <div class="wide-card download-card">
-        <div class="download-row">
-            <div>
-                <div class="summary-label">Daily report</div>
-                <div class="download-hint">Exports the selected day: <span id="daily-date-label"></span></div>
-            </div>
-            <div class="download-actions">
-                <button type="button" class="download-button" onclick="downloadReport('daily', 'csv')">Download CSV</button>
-                <button type="button" class="download-button" onclick="downloadReport('daily', 'pdf')">Download PDF</button>
-            </div>
-        </div>
-        <div class="download-row">
-            <div>
-                <div class="summary-label">Weekly report</div>
-                <div class="download-hint">Week of <span id="weekly-range-label"></span> (Mon–Sun)</div>
-            </div>
-            <div class="download-actions">
-                <button type="button" class="download-button" onclick="downloadReport('weekly', 'csv')">Download CSV</button>
-                <button type="button" class="download-button" onclick="downloadReport('weekly', 'pdf')">Download PDF</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Top summary cards -->
     <div class="summary-grid">
