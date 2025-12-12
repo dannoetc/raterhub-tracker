@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
+import types
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session as OrmSession, sessionmaker
@@ -222,3 +224,43 @@ def test_weekly_pdf_renderer_matches_template_snapshot():
 
     assert html.strip() == expected_html.strip()
     assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_weasyprint_polyfills_missing_pydyf_transform(monkeypatch):
+    class FakeStream:
+        def __init__(self):
+            self.stream = []
+
+        def set_matrix(self, a, b, c, d, e, f):
+            self.stream.append(b" ".join(
+                str(x).encode() if not isinstance(x, bytes) else x for x in (a, b, c, d, e, f, b"cm")
+            ))
+
+        def set_text_matrix(self, a, b, c, d, e, f):
+            self.stream.append(b"tm:" + b" ".join(
+                str(x).encode() if not isinstance(x, bytes) else x for x in (a, b, c, d, e, f)
+            ))
+
+    class FakeHTML:
+        def __init__(self, string: str, base_url: str | None = None):
+            self.string = string
+            self.base_url = base_url
+
+        def write_pdf(self):
+            return b"fake-pdf"
+
+    monkeypatch.setitem(sys.modules, "pydyf", types.SimpleNamespace(Stream=FakeStream))
+    monkeypatch.setitem(sys.modules, "weasyprint", types.SimpleNamespace(HTML=FakeHTML))
+
+    from app.services.report_exports import _weasyprint_render
+
+    pdf_bytes = _weasyprint_render("<p>ok</p>", base_url=".")
+
+    patched_stream = sys.modules["pydyf"].Stream()
+    patched_stream.transform(1, 0, 0, 1, 5, 6)
+    patched_stream.text_matrix(1, 0, 0, 1, 0, 0)
+
+    assert pdf_bytes == b"fake-pdf"
+    assert hasattr(sys.modules["pydyf"].Stream, "transform")
+    assert patched_stream.stream[-2].endswith(b"cm")
+    assert any(item.startswith(b"tm:") for item in patched_stream.stream)

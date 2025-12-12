@@ -33,6 +33,24 @@ def _weasyprint_render(html: str, *, base_url: str | None = None) -> bytes:
     """
 
     try:
+        import pydyf  # type: ignore
+
+        if not hasattr(pydyf.Stream, "transform"):
+            # WeasyPrint 62+ expects ``pydyf.Stream.transform`` to exist.
+            # Some environments ship older pydyf builds, so we polyfill the
+            # method to keep HTML rendering functional instead of falling back
+            # to the plain-text PDF.
+            def _transform(self, a=1, b=0, c=0, d=1, e=0, f=0):
+                self.set_matrix(a, b, c, d, e, f)
+
+            pydyf.Stream.transform = _transform  # type: ignore[attr-defined]
+
+        if not hasattr(pydyf.Stream, "text_matrix"):
+            def _text_matrix(self, a=1, b=0, c=0, d=1, e=0, f=0):
+                self.set_text_matrix(a, b, c, d, e, f)
+
+            pydyf.Stream.text_matrix = _text_matrix  # type: ignore[attr-defined]
+
         from weasyprint import HTML  # type: ignore
     except ModuleNotFoundError:
         return b""
