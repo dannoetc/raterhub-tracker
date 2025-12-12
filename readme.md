@@ -154,6 +154,19 @@ source app/.venv/bin/activate
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+### Database migrations for email features
+
+If you are upgrading an existing deployment, run the lightweight migration to
+add the email-related audit table and user preference columns:
+
+```bash
+SECRET_KEY=... DATABASE_URL=... python scripts/add_report_email_tables.py
+```
+
+The script is idempotent and can be re-run safely; it only creates the
+`report_audit_logs` table and missing `users.timezone`/`users.wants_report_emails`
+columns when they are absent.
+
 ---
 
 ## 🔐 Environment Configuration (`.env`)
