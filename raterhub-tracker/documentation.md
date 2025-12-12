@@ -18,7 +18,26 @@ RaterHub Tracker is a FastAPI application for session-based productivity trackin
    ```
 3. **Docker Compose**
    ```bash
-   docker-compose up --build
+   docker compose up --build           # FastAPI on :8000
+   docker compose --profile nginx up   # Adds nginx reverse proxy on :80
+   ```
+
+   The optional nginx service reads `nginx/default.conf` and forwards traffic to
+   the `web` container while preserving forwarded headers for proper request
+   logging.
+
+4. **Manual setup (no Docker)**
+   ```bash
+   bash scripts/manual_setup.sh
+   ```
+
+   The helper script creates `app/.venv`, installs requirements, and writes a
+   starter `.env` if one does not yet exist. Once it completes, activate the
+   virtual environment and start the app from the `app/` directory:
+
+   ```bash
+   source app/.venv/bin/activate
+   uvicorn main:app --host 0.0.0.0 --port 8000
    ```
 
 ## Configuration

@@ -12,4 +12,4 @@ echo "Database is ready."
 # You can hook Alembic or similar here in future
 
 # Start the app
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"

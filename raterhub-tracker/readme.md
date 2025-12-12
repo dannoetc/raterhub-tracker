@@ -40,6 +40,34 @@ docker build -t raterhub-tracker .
 docker run --rm -p 8000:8000 --env-file .env raterhub-tracker
 ```
 
+### Docker Compose (with optional nginx reverse proxy)
+
+```bash
+docker compose up --build           # FastAPI available on :8000
+docker compose --profile nginx up   # Adds nginx reverse proxy on :80
+```
+
+nginx proxies requests to the `web` container and forwards headers for correct
+client IP reporting. Its configuration lives in `nginx/default.conf` and is
+mounted read-only when the profile is enabled.
+
+### Manual setup (no Docker)
+
+If you prefer to run everything directly on your host:
+
+```bash
+bash scripts/manual_setup.sh
+```
+
+The script creates a virtual environment under `app/.venv`, installs
+dependencies, and writes a baseline `.env` if one is missing. Afterwards, run
+the server from the `app/` directory with:
+
+```bash
+source app/.venv/bin/activate
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
 ---
 
 ## 🔐 Environment Configuration (`.env`)
