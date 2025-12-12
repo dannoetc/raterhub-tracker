@@ -11,7 +11,23 @@ async function loadPopupData() {
     includeLastStatus: true,
   });
 
-  if (statusResp?.authenticated) {
+  let isAuthenticated = Boolean(statusResp?.authenticated);
+
+  if (!isAuthenticated && statusResp?.hasCredentials) {
+    authStatusEl.textContent = "Signing in…";
+    authStatusEl.style.color = "#6b7280";
+    const loginResp = await chrome.runtime.sendMessage({ type: "LOGIN" });
+    isAuthenticated = Boolean(loginResp?.ok);
+    if (isAuthenticated) {
+      authStatusEl.textContent = "Logged in";
+      authStatusEl.style.color = "#15803d";
+      lastStatusEl.textContent = "Logged in";
+    } else {
+      authStatusEl.textContent = "Login failed";
+      authStatusEl.style.color = "#b91c1c";
+      lastStatusEl.textContent = loginResp?.error ? `Error: ${loginResp.error}` : "Login failed";
+    }
+  } else if (isAuthenticated) {
     authStatusEl.textContent = "Logged in";
     authStatusEl.style.color = "#15803d";
   } else {
@@ -19,9 +35,9 @@ async function loadPopupData() {
     authStatusEl.style.color = "#b91c1c";
   }
 
-  if (statusResp?.lastStatus) {
+  if (statusResp?.lastStatus && !isAuthenticated) {
     lastStatusEl.textContent = statusResp.lastStatus;
-  } else {
+  } else if (!lastStatusEl.textContent || lastStatusEl.textContent === "—") {
     lastStatusEl.textContent = "No recent activity";
   }
 

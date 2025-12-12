@@ -38,6 +38,10 @@
     sessionStatsEl,
     resizeObserver;
 
+  // Track expanded sizing so collapse can shrink the widget footprint
+  let expandedMinHeight = null;
+  let expandedHeight = null;
+
   // --- Drag state ---
   let isDragging = false;
   let dragStartMouseX = 0;
@@ -159,8 +163,13 @@
   function applyCollapsedState() {
     if (!bodyContainer || !toggleBtn) return;
     if (isCollapsed) {
+      const computed = window.getComputedStyle(widget);
+      expandedMinHeight = widget.style.minHeight || computed.minHeight;
+      expandedHeight = widget.style.height || computed.height;
       bodyContainer.style.display = "none";
       toggleBtn.textContent = "▴";
+      widget.style.minHeight = "0";
+      widget.style.height = "auto";
       if (collapsedTimerEl) {
         collapsedTimerEl.style.display = "inline-flex";
         collapsedTimerEl.style.alignItems = "center";
@@ -168,6 +177,8 @@
     } else {
       bodyContainer.style.display = "block";
       toggleBtn.textContent = "▾";
+      widget.style.minHeight = expandedMinHeight || "200px";
+      widget.style.height = expandedHeight || "";
       if (collapsedTimerEl) {
         collapsedTimerEl.style.display = "none";
       }
@@ -215,16 +226,6 @@
     title.style.fontWeight = "700";
     title.style.fontSize = "13px";
     title.style.color = "#0f172a";
-
-    collapsedTimerEl = document.createElement("span");
-    collapsedTimerEl.textContent = "00:00";
-    collapsedTimerEl.style.fontSize = "11px";
-    collapsedTimerEl.style.fontWeight = "700";
-    collapsedTimerEl.style.color = "#4b5563";
-    collapsedTimerEl.style.display = "none";
-
-    titleWrapper.appendChild(title);
-    titleWrapper.appendChild(collapsedTimerEl);
 
     collapsedTimerEl = document.createElement("span");
     collapsedTimerEl.textContent = "00:00";
