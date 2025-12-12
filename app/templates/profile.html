@@ -40,6 +40,18 @@
         color: var(--accent-dark);
     }
 
+    .switch-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .switch-row input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--accent);
+    }
+
     .input, select {
         width: 100%;
         padding: 9px 10px;
@@ -190,6 +202,26 @@
                     {% endfor %}
                 </select>
                 <div class="hint">Pick the timezone used when showing your session times.</div>
+            </div>
+
+            <div class="form-field">
+                <label for="wants_report_emails">Report emails</label>
+                <div class="switch-row">
+                    <input
+                        type="checkbox"
+                        id="wants_report_emails"
+                        name="wants_report_emails"
+                        value="1"
+                        {% if user.wants_report_emails %}checked{% endif %}
+                        {% if not email_reports_supported %}disabled{% endif %}
+                    >
+                    <span>Send me daily summaries at midnight</span>
+                </div>
+                {% if email_reports_supported %}
+                <div class="hint">We will email you the previous day's report at the start of your local day.</div>
+                {% else %}
+                <div class="hint">Email delivery is disabled on this deployment.</div>
+                {% endif %}
             </div>
 
             <div class="actions">

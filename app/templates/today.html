@@ -103,6 +103,47 @@
             margin-bottom: 18px;
         }
 
+        .download-card {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .download-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .download-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .download-button {
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border-subtle);
+            background: linear-gradient(180deg, #fff, #f5f1ff);
+            color: var(--accent-dark);
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        }
+
+        .download-button:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .download-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
         .summary-label {
             font-size: 12px;
             text-transform: uppercase;
@@ -386,6 +427,7 @@
             <input
                 type="date"
                 name="date"
+                id="date-picker"
                 value="{{ selected_date if selected_date else (summary.date.strftime('%Y-%m-%d') if summary.date else '') }}"
                 style="padding: 4px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px;"
             >
@@ -409,6 +451,29 @@
         </button>
     </form>
     <p class="subtitle" style="margin-top: 0;">Times shown in {{ user_timezone or 'UTC' }}.</p>
+
+    <div class="wide-card download-card">
+        <div class="download-row">
+            <div>
+                <div class="summary-label">Daily report</div>
+                <div class="download-hint">Exports the selected day: <span id="daily-date-label"></span></div>
+            </div>
+            <div class="download-actions">
+                <button type="button" class="download-button" onclick="downloadReport('daily', 'csv')">Download CSV</button>
+                <button type="button" class="download-button" onclick="downloadReport('daily', 'pdf')">Download PDF</button>
+            </div>
+        </div>
+        <div class="download-row">
+            <div>
+                <div class="summary-label">Weekly report</div>
+                <div class="download-hint">Week of <span id="weekly-range-label"></span> (Mon–Sun)</div>
+            </div>
+            <div class="download-actions">
+                <button type="button" class="download-button" onclick="downloadReport('weekly', 'csv')">Download CSV</button>
+                <button type="button" class="download-button" onclick="downloadReport('weekly', 'pdf')">Download PDF</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Top summary cards -->
     <div class="summary-grid">
@@ -497,7 +562,7 @@
             No activity recorded yet today. Once you start rating tasks, your sessions will show up here.
         </div>
     {% else %}
-        <div class="sessions-list">
+<div class="sessions-list">
             {% for s in summary.sessions %}
                 <div class="session-card">
                     <div class="session-header">
@@ -571,6 +636,77 @@
 </div>
 
 <script>
+    const dateInput = document.getElementById('date-picker');
+    const fallbackDate = "{{ selected_date if selected_date else (summary.date.strftime('%Y-%m-%d') if summary.date else '') }}";
+
+    function getSelectedDateIso() {
+        return (dateInput && dateInput.value) || fallbackDate || '';
+    }
+
+    function computeWeekStart(dateIso) {
+        const [year, month, day] = dateIso.split('-').map((value) => Number.parseInt(value, 10));
+        if (!year || !month || !day) return '';
+        const date = new Date(Date.UTC(year, month - 1, day));
+        const weekday = date.getUTCDay();
+        const daysSinceMonday = (weekday + 6) % 7;
+        date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function computeWeekRange(dateIso) {
+        const startIso = computeWeekStart(dateIso);
+        if (!startIso) return { start: '', end: '' };
+        const [year, month, day] = startIso.split('-').map((value) => Number.parseInt(value, 10));
+        const endDate = new Date(Date.UTC(year, month - 1, day));
+        endDate.setUTCDate(endDate.getUTCDate() + 6);
+        const endIso = endDate.toISOString().slice(0, 10);
+        return { start: startIso, end: endIso };
+    }
+
+    function updateReportLabels() {
+        const dateIso = getSelectedDateIso();
+        const dailyLabel = document.getElementById('daily-date-label');
+        const weeklyLabel = document.getElementById('weekly-range-label');
+
+        if (dailyLabel) {
+            dailyLabel.textContent = dateIso || 'select a date first';
+        }
+
+        if (weeklyLabel) {
+            const range = computeWeekRange(dateIso);
+            weeklyLabel.textContent = range.start && range.end ? `${range.start} – ${range.end}` : 'select a date first';
+        }
+    }
+
+    function downloadReport(scope, format) {
+        const dateIso = getSelectedDateIso();
+        if (!dateIso) {
+            alert('Pick a date to export your reports.');
+            return;
+        }
+
+        const params = new URLSearchParams();
+        if (scope === 'daily') {
+            params.set('date', dateIso);
+        } else {
+            const weekStart = computeWeekStart(dateIso);
+            if (!weekStart) {
+                alert('Could not determine the start of that week.');
+                return;
+            }
+            params.set('week_start', weekStart);
+        }
+
+        window.location.href = `/reports/${scope}.${format}?${params.toString()}`;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (dateInput) {
+            dateInput.addEventListener('change', updateReportLabels);
+        }
+        updateReportLabels();
+    });
+
     (function() {
         const tooltip = document.getElementById('sparkline-tooltip');
         const axis = document.getElementById('sparkline-axis');
