@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Weekly Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+        header { border-bottom: 2px solid #444; margin-bottom: 16px; padding-bottom: 8px; }
+        h1, h2, h3 { margin: 0 0 8px 0; }
+        .meta { font-size: 12px; color: #555; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 12px; text-align: left; }
+        th { background: #f2f2f2; }
+        .emoji { font-size: 16px; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Weekly Report</h1>
+    <div class="meta">
+        User: {{ metadata.user_name }}<br>
+        Timezone: {{ metadata.timezone }}<br>
+        Generated at: {{ metadata.generated_at_label }}
+    </div>
+</header>
+
+<section>
+    <h2>Week of {{ week_start_label }} to {{ week_end_label }}</h2>
+    <p>Total Sessions: {{ totals.total_sessions }} · Total Questions: {{ totals.total_questions }} · Total Active Seconds: {{ totals.total_active_seconds }}</p>
+</section>
+
+<section>
+    <h3>Daily Breakdown</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Sessions</th>
+                <th>Questions</th>
+                <th>Total Active</th>
+                <th>Average Active</th>
+                <th>Pace</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for day in daily_reports %}
+            <tr>
+                <td>{{ day.summary.date.strftime("%Y-%m-%d") }}</td>
+                <td>{{ day.summary.total_sessions }}</td>
+                <td>{{ day.summary.total_questions }}</td>
+                <td>{{ day.summary.total_active_mmss }}</td>
+                <td>{{ day.summary.avg_active_mmss }}</td>
+                <td><span class="emoji">{{ day.summary.daily_pace_emoji }}</span> {{ day.summary.daily_pace_label }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section>
+    <h3>Sessions by Day</h3>
+    {% for day in daily_reports %}
+        <h4>{{ day.summary.date.strftime("%A, %Y-%m-%d") }}</h4>
+        {% if day.sessions %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Session</th>
+                    <th>Questions</th>
+                    <th>Average Active</th>
+                    <th>Pace</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for session in day.sessions %}
+                <tr>
+                    <td>{{ session.session_id }}</td>
+                    <td>{{ session.total_questions }}</td>
+                    <td>{{ session.avg_active_mmss }}</td>
+                    <td><span class="emoji">{{ session.pace_emoji }}</span> {{ session.pace_label }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p>No sessions recorded.</p>
+        {% endif %}
+    {% endfor %}
+</section>
+</body>
+</html>

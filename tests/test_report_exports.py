@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session as OrmSession, sessionmaker
 
 from app.db_models import Base, Question, Session as DbSession, User
 from app.main import download_daily_report, download_weekly_report
-from app.services.report_exports import daily_report_to_csv, weekly_report_to_csv
+from app.services.report_exports import (
+    daily_report_to_csv,
+    daily_report_to_pdf,
+    render_daily_report_html,
+    render_weekly_report_html,
+    weekly_report_to_csv,
+    weekly_report_to_pdf,
+)
 from app.services.reporting import build_daily_report, build_weekly_report
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -30,6 +37,7 @@ def seed_daily_data(db: OrmSession) -> User:
 
     session = DbSession(
         user_id=user.id,
+        public_id="daily-session-1",
         started_at=datetime(2024, 1, 1, 10, 0, 0),
         ended_at=datetime(2024, 1, 1, 10, 10, 0),
         is_active=False,
@@ -66,6 +74,7 @@ def seed_weekly_data(db: OrmSession) -> User:
 
     first_session = DbSession(
         user_id=user.id,
+        public_id="weekly-session-1",
         started_at=datetime(2024, 1, 1, 9, 0, 0),
         ended_at=datetime(2024, 1, 1, 9, 8, 0),
         is_active=False,
@@ -73,6 +82,7 @@ def seed_weekly_data(db: OrmSession) -> User:
     )
     third_session = DbSession(
         user_id=user.id,
+        public_id="weekly-session-3",
         started_at=datetime(2024, 1, 3, 11, 0, 0),
         ended_at=datetime(2024, 1, 3, 11, 5, 0),
         is_active=False,
@@ -156,3 +166,59 @@ def test_csv_endpoints_return_csv_responses():
     db.close()
 
     assert weekly_response.body.decode().startswith("date,session_count")
+
+
+def test_daily_pdf_renderer_matches_template_snapshot():
+    db = make_db_session()
+    user = seed_daily_data(db)
+    generated_at = datetime(2024, 1, 2, 12, 0, tzinfo=timezone.utc)
+
+    report = build_daily_report(db, user.id, datetime(2024, 1, 1))
+    html = render_daily_report_html(
+        report,
+        user_name="csv-user@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    expected_html = (FIXTURES / "daily_report.html").read_text()
+
+    pdf_bytes = daily_report_to_pdf(
+        report,
+        user_name="csv-user@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    db.close()
+
+    assert html.strip() == expected_html.strip()
+    assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_weekly_pdf_renderer_matches_template_snapshot():
+    db = make_db_session()
+    user = seed_weekly_data(db)
+    generated_at = datetime(2024, 1, 4, 9, 30, tzinfo=timezone.utc)
+
+    report = build_weekly_report(db, user.id, datetime(2024, 1, 1))
+    html = render_weekly_report_html(
+        report,
+        user_name="csv-weekly@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    expected_html = (FIXTURES / "weekly_report.html").read_text()
+
+    pdf_bytes = weekly_report_to_pdf(
+        report,
+        user_name="csv-weekly@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    db.close()
+
+    assert html.strip() == expected_html.strip()
+    assert pdf_bytes.startswith(b"%PDF")
