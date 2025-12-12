@@ -417,6 +417,12 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return current_user
 
+
+def _parse_bool(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return str(value).lower() in {"1", "true", "yes", "on"}
+
 # ============================================================
 # Root & health
 # ============================================================
@@ -1659,6 +1665,41 @@ def delete_question_web(
 # Admin debug endpoints + HTML dashboard
 # ============================================================
 
+
+def _admin_dashboard_context(
+    db: OrmSession,
+    *,
+    target_user_id: Optional[int],
+    flash_message: Optional[str] = None,
+    flash_error: Optional[str] = None,
+):
+    users = db.query(User).order_by(User.created_at.desc()).all()
+
+    target_user = None
+    if target_user_id is not None:
+        target_user = next((u for u in users if u.id == target_user_id), None)
+
+    if target_user is None and users:
+        target_user = users[0]
+
+    sessions: list[DbSession] = []
+    if target_user:
+        sessions = (
+            db.query(DbSession)
+            .filter(DbSession.user_id == target_user.id)
+            .order_by(DbSession.started_at.desc())
+            .limit(20)
+            .all()
+        )
+
+    return {
+        "users": users,
+        "target_user": target_user,
+        "sessions": sessions,
+        "flash_message": flash_message,
+        "flash_error": flash_error,
+    }
+
 @app.get("/admin/debug/user-sessions")
 def debug_user_sessions(
     user_id: Optional[int] = Query(None),
@@ -1730,6 +1771,172 @@ def debug_user_events(
     ]
 
 
+@app.get("/admin/users")
+def list_users_admin(current_user: User = Depends(require_admin), db: OrmSession = Depends(get_db)):
+    users = db.query(User).order_by(User.created_at.desc()).all()
+    return [
+        {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+            "last_login_at": user.last_login_at,
+        }
+        for user in users
+    ]
+
+
+@app.post("/admin/users/manage", response_class=HTMLResponse)
+def manage_users_admin(
+    request: Request,
+    form_type: str = Form(...),
+    csrf_token: Optional[str] = Form(None),
+    view_user_id: Optional[int] = Form(None),
+    user_id: Optional[int] = Form(None),
+    email: str = Form(""),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    password: str = Form(""),
+    password_confirm: str = Form(""),
+    role: str = Form("user"),
+    is_active: Optional[str] = Form(None),
+    new_password: str = Form(""),
+    new_password_confirm: str = Form(""),
+    confirm_email: str = Form(""),
+    current_user: User = Depends(require_admin),
+    db: OrmSession = Depends(get_db),
+):
+    flash_message = None
+    flash_error = None
+    status_code = 200
+    target_user_id = view_user_id
+
+    if not validate_csrf(request, csrf_token):
+        flash_error = "Invalid or missing CSRF token."
+        status_code = 400
+    elif form_type == "create":
+        normalized_email = email.strip().lower()
+
+        if not normalized_email or "@" not in normalized_email:
+            flash_error = "Please provide a valid email."
+        elif password != password_confirm:
+            flash_error = "Passwords do not match."
+        elif db.query(User).filter(User.email == normalized_email).first():
+            flash_error = "Email is already registered."
+        else:
+            is_valid, policy_error = validate_password_policy(password)
+            if not is_valid:
+                flash_error = policy_error
+            else:
+                now = datetime.utcnow()
+                sanitized_role = role if role in {"admin", "user"} else "user"
+                active_flag = _parse_bool(is_active) if is_active is not None else True
+                new_user = User(
+                    external_id=normalized_email,
+                    email=normalized_email,
+                    first_name=first_name.strip(),
+                    last_name=last_name.strip(),
+                    created_at=now,
+                    last_login_at=None,
+                    password_hash=get_password_hash(password),
+                    auth_provider="local",
+                    is_active=active_flag,
+                    role=sanitized_role,
+                    timezone="UTC",
+                )
+                db.add(new_user)
+                db.commit()
+                db.refresh(new_user)
+                db.add(PasswordHistory(user_id=new_user.id, password_hash=new_user.password_hash))
+                db.commit()
+
+                flash_message = "User account created."
+                target_user_id = new_user.id
+
+    elif form_type == "activation":
+        if user_id is None:
+            flash_error = "User selection is required."
+        else:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                flash_error = "User not found."
+            elif user.id == current_user.id:
+                flash_error = "You cannot change your own activation from this page."
+            else:
+                user.is_active = _parse_bool(is_active)
+                db.commit()
+                flash_message = "User activation status updated."
+                target_user_id = user.id
+
+    elif form_type == "reset_password":
+        if user_id is None:
+            flash_error = "User selection is required."
+        elif new_password != new_password_confirm:
+            flash_error = "New passwords do not match."
+        else:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                flash_error = "User not found."
+            else:
+                recent_history = (
+                    db.query(PasswordHistory)
+                    .filter(PasswordHistory.user_id == user.id)
+                    .order_by(PasswordHistory.created_at.desc())
+                    .limit(5)
+                    .all()
+                )
+                recent_hashes = [p.password_hash for p in recent_history]
+                is_valid, policy_error = validate_password_policy(
+                    new_password, recent_hashes
+                )
+
+                if not is_valid:
+                    flash_error = policy_error
+                else:
+                    new_hash = get_password_hash(new_password)
+                    user.password_hash = new_hash
+                    db.add(PasswordHistory(user_id=user.id, password_hash=new_hash))
+                    db.commit()
+                    flash_message = "Password reset successfully."
+                    target_user_id = user.id
+
+    elif form_type == "delete":
+        if user_id is None:
+            flash_error = "User selection is required."
+        else:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                flash_error = "User not found."
+            elif confirm_email.strip().lower() != user.email.lower():
+                flash_error = "Confirmation email does not match."
+            elif user.id == current_user.id:
+                flash_error = "You cannot delete your own account from the admin console."
+            else:
+                db.delete(user)
+                db.commit()
+                flash_message = "User deleted."
+                target_user_id = None
+    else:
+        flash_error = "Unknown admin action."
+
+    if flash_error:
+        status_code = 400
+
+    context = _admin_dashboard_context(
+        db,
+        target_user_id=target_user_id,
+        flash_message=flash_message,
+        flash_error=flash_error,
+    )
+    context["user"] = current_user
+    response = render_template_with_csrf("admin_dashboard.html", request, context)
+    response.status_code = status_code
+    return response
+
+
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 def admin_dashboard(
     request: Request,
@@ -1738,27 +1945,167 @@ def admin_dashboard(
     db: OrmSession = Depends(get_db),
 ):
     target_user_id = user_id if user_id is not None else current_user.id
-    target_user = db.query(User).filter(User.id == target_user_id).first()
-    if not target_user:
+    context = _admin_dashboard_context(db, target_user_id=target_user_id)
+    context["user"] = current_user
+    return render_template_with_csrf("admin_dashboard.html", request, context)
+
+
+def _get_admin_report_user(
+    db: OrmSession, requested_user_id: Optional[int], current_user: User
+) -> User:
+    target_user_id = requested_user_id if requested_user_id is not None else current_user.id
+    user = db.query(User).filter(User.id == target_user_id).first()
+    if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    return user
 
-    sessions = (
-        db.query(DbSession)
-        .filter(DbSession.user_id == target_user_id)
-        .order_by(DbSession.started_at.desc())
-        .limit(20)
-        .all()
+
+@app.get("/admin/reports/daily.csv")
+def admin_download_daily_report(
+    date: str = Query(..., description="Date in YYYY-MM-DD (user timezone)"),
+    user_id: Optional[int] = Query(None),
+    current_user: User = Depends(require_admin),
+    db: OrmSession = Depends(get_db),
+):
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    from app.services.report_exports import daily_report_to_csv
+    from app.services.reporting import build_daily_report
+
+    target_user = _get_admin_report_user(db, user_id, current_user)
+    report = build_daily_report(db, target_user.id, target_date)
+    csv_content = daily_report_to_csv(report)
+
+    filename = f"daily_report_{target_date.date().isoformat()}_{target_user.id}.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    log_report_event(
+        db,
+        user_id=target_user.id,
+        report_scope="daily",
+        report_format="csv",
+        report_date=target_date.date(),
+        triggered_by="admin_download",
+        details=f"requested_by={current_user.email}",
     )
 
-    return templates.TemplateResponse(
-        "admin_dashboard.html",
-        {
-            "request": request,
-            "sessions": sessions,
-            "user": current_user,
-            "target_user": target_user,
-        },
+    return Response(content=csv_content, media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/admin/reports/weekly.csv")
+def admin_download_weekly_report(
+    week_start: str = Query(..., description="Week start in YYYY-MM-DD (user timezone)"),
+    user_id: Optional[int] = Query(None),
+    current_user: User = Depends(require_admin),
+    db: OrmSession = Depends(get_db),
+):
+    try:
+        start_date = datetime.strptime(week_start, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    from app.services.report_exports import weekly_report_to_csv
+    from app.services.reporting import build_weekly_report
+
+    target_user = _get_admin_report_user(db, user_id, current_user)
+    report = build_weekly_report(db, target_user.id, start_date)
+    csv_content = weekly_report_to_csv(report)
+
+    filename = f"weekly_report_{start_date.date().isoformat()}_{target_user.id}.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    log_report_event(
+        db,
+        user_id=target_user.id,
+        report_scope="weekly",
+        report_format="csv",
+        report_date=start_date.date(),
+        triggered_by="admin_download",
+        details=f"requested_by={current_user.email}",
     )
+
+    return Response(content=csv_content, media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/admin/reports/daily.pdf")
+def admin_download_daily_pdf(
+    date: str = Query(..., description="Date in YYYY-MM-DD (user timezone)"),
+    user_id: Optional[int] = Query(None),
+    current_user: User = Depends(require_admin),
+    db: OrmSession = Depends(get_db),
+):
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    from app.services.reporting import build_daily_report
+    from app.services.report_exports import daily_report_to_pdf
+
+    target_user = _get_admin_report_user(db, user_id, current_user)
+    report = build_daily_report(db, target_user.id, target_date)
+    pdf_bytes = daily_report_to_pdf(
+        report,
+        user_name=get_user_display_name(target_user),
+        user_timezone=getattr(target_user, "timezone", "UTC"),
+    )
+
+    filename = f"daily_report_{target_date.date().isoformat()}_{target_user.id}.pdf"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    log_report_event(
+        db,
+        user_id=target_user.id,
+        report_scope="daily",
+        report_format="pdf",
+        report_date=target_date.date(),
+        triggered_by="admin_download",
+        details=f"requested_by={current_user.email}",
+    )
+
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@app.get("/admin/reports/weekly.pdf")
+def admin_download_weekly_pdf(
+    week_start: str = Query(..., description="Week start in YYYY-MM-DD (user timezone)"),
+    user_id: Optional[int] = Query(None),
+    current_user: User = Depends(require_admin),
+    db: OrmSession = Depends(get_db),
+):
+    try:
+        start_date = datetime.strptime(week_start, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    from app.services.reporting import build_weekly_report
+    from app.services.report_exports import weekly_report_to_pdf
+
+    target_user = _get_admin_report_user(db, user_id, current_user)
+    report = build_weekly_report(db, target_user.id, start_date)
+    pdf_bytes = weekly_report_to_pdf(
+        report,
+        user_name=get_user_display_name(target_user),
+        user_timezone=getattr(target_user, "timezone", "UTC"),
+    )
+
+    filename = f"weekly_report_{start_date.date().isoformat()}_{target_user.id}.pdf"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    log_report_event(
+        db,
+        user_id=target_user.id,
+        report_scope="weekly",
+        report_format="pdf",
+        report_date=start_date.date(),
+        triggered_by="admin_download",
+        details=f"requested_by={current_user.email}",
+    )
+
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 # ============================================================
 # Profile (timezone, etc.)
