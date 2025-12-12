@@ -1,12 +1,21 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+import sys
+import types
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session as OrmSession, sessionmaker
 
 from app.db_models import Base, Question, Session as DbSession, User
 from app.main import download_daily_report, download_weekly_report
-from app.services.report_exports import daily_report_to_csv, weekly_report_to_csv
+from app.services.report_exports import (
+    daily_report_to_csv,
+    daily_report_to_pdf,
+    render_daily_report_html,
+    render_weekly_report_html,
+    weekly_report_to_csv,
+    weekly_report_to_pdf,
+)
 from app.services.reporting import build_daily_report, build_weekly_report
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -30,6 +39,7 @@ def seed_daily_data(db: OrmSession) -> User:
 
     session = DbSession(
         user_id=user.id,
+        public_id="daily-session-1",
         started_at=datetime(2024, 1, 1, 10, 0, 0),
         ended_at=datetime(2024, 1, 1, 10, 10, 0),
         is_active=False,
@@ -66,6 +76,7 @@ def seed_weekly_data(db: OrmSession) -> User:
 
     first_session = DbSession(
         user_id=user.id,
+        public_id="weekly-session-1",
         started_at=datetime(2024, 1, 1, 9, 0, 0),
         ended_at=datetime(2024, 1, 1, 9, 8, 0),
         is_active=False,
@@ -73,6 +84,7 @@ def seed_weekly_data(db: OrmSession) -> User:
     )
     third_session = DbSession(
         user_id=user.id,
+        public_id="weekly-session-3",
         started_at=datetime(2024, 1, 3, 11, 0, 0),
         ended_at=datetime(2024, 1, 3, 11, 5, 0),
         is_active=False,
@@ -156,3 +168,99 @@ def test_csv_endpoints_return_csv_responses():
     db.close()
 
     assert weekly_response.body.decode().startswith("date,session_count")
+
+
+def test_daily_pdf_renderer_matches_template_snapshot():
+    db = make_db_session()
+    user = seed_daily_data(db)
+    generated_at = datetime(2024, 1, 2, 12, 0, tzinfo=timezone.utc)
+
+    report = build_daily_report(db, user.id, datetime(2024, 1, 1))
+    html = render_daily_report_html(
+        report,
+        user_name="csv-user@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    expected_html = (FIXTURES / "daily_report.html").read_text()
+
+    pdf_bytes = daily_report_to_pdf(
+        report,
+        user_name="csv-user@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    db.close()
+
+    assert html.strip() == expected_html.strip()
+    assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_weekly_pdf_renderer_matches_template_snapshot():
+    db = make_db_session()
+    user = seed_weekly_data(db)
+    generated_at = datetime(2024, 1, 4, 9, 30, tzinfo=timezone.utc)
+
+    report = build_weekly_report(db, user.id, datetime(2024, 1, 1))
+    html = render_weekly_report_html(
+        report,
+        user_name="csv-weekly@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    expected_html = (FIXTURES / "weekly_report.html").read_text()
+
+    pdf_bytes = weekly_report_to_pdf(
+        report,
+        user_name="csv-weekly@example.com",
+        user_timezone="UTC",
+        generated_at=generated_at,
+    )
+
+    db.close()
+
+    assert html.strip() == expected_html.strip()
+    assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_weasyprint_polyfills_missing_pydyf_transform(monkeypatch):
+    class FakeStream:
+        def __init__(self):
+            self.stream = []
+
+        def set_matrix(self, a, b, c, d, e, f):
+            self.stream.append(b" ".join(
+                str(x).encode() if not isinstance(x, bytes) else x for x in (a, b, c, d, e, f, b"cm")
+            ))
+
+        def set_text_matrix(self, a, b, c, d, e, f):
+            self.stream.append(b"tm:" + b" ".join(
+                str(x).encode() if not isinstance(x, bytes) else x for x in (a, b, c, d, e, f)
+            ))
+
+    class FakeHTML:
+        def __init__(self, string: str, base_url: str | None = None):
+            self.string = string
+            self.base_url = base_url
+
+        def write_pdf(self):
+            return b"fake-pdf"
+
+    monkeypatch.setitem(sys.modules, "pydyf", types.SimpleNamespace(Stream=FakeStream))
+    monkeypatch.setitem(sys.modules, "weasyprint", types.SimpleNamespace(HTML=FakeHTML))
+
+    from app.services.report_exports import _weasyprint_render
+
+    pdf_bytes = _weasyprint_render("<p>ok</p>", base_url=".")
+
+    patched_stream = sys.modules["pydyf"].Stream()
+    patched_stream.transform(1, 0, 0, 1, 5, 6)
+    patched_stream.text_matrix(1, 0, 0, 1, 0, 0)
+
+    assert pdf_bytes == b"fake-pdf"
+    assert hasattr(sys.modules["pydyf"].Stream, "transform")
+    assert patched_stream.stream[-2].endswith(b"cm")
+    assert any(item.startswith(b"tm:") for item in patched_stream.stream)
