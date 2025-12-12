@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Daily Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+        header { border-bottom: 2px solid #444; margin-bottom: 16px; padding-bottom: 8px; }
+        h1, h2, h3 { margin: 0 0 8px 0; }
+        .meta { font-size: 12px; color: #555; }
+        .summary { margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 12px; text-align: left; }
+        th { background: #f2f2f2; }
+        .emoji { font-size: 16px; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Daily Report</h1>
+    <div class="meta">
+        User: {{ metadata.user_name }}<br>
+        Timezone: {{ metadata.timezone }}<br>
+        Generated at: {{ metadata.generated_at_label }}
+    </div>
+</header>
+
+<section class="summary">
+    <h2>Summary for {{ summary.date.strftime("%Y-%m-%d") }}</h2>
+    <p>
+        Sessions: {{ summary.total_sessions }} · Questions: {{ summary.total_questions }} ·
+        Total Active: {{ summary.total_active_mmss }} · Average Active: {{ summary.avg_active_mmss }}
+    </p>
+    <p>Pace: <span class="emoji">{{ summary.daily_pace_emoji }}</span> {{ summary.daily_pace_label }}</p>
+</section>
+
+<section>
+    <h3>Hourly Activity</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Hour</th>
+                <th>Questions</th>
+                <th>Active Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bucket in hourly_buckets %}
+            <tr>
+                <td>{{ "%02d:00" | format(bucket.hour) }}</td>
+                <td>{{ bucket.total_questions }}</td>
+                <td>{{ bucket.active_mmss }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section>
+    <h3>Sessions</h3>
+    {% for session in session_summaries %}
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="6">
+                        Session {{ session.session_id }}
+                        · Started: {{ session.started_at.strftime("%Y-%m-%d %H:%M") }}
+                        · Ended: {% if session.ended_at %}{{ session.ended_at.strftime("%Y-%m-%d %H:%M") }}{% else %}Active{% endif %}
+                    </th>
+                </tr>
+                <tr>
+                    <th>Total Questions</th>
+                    <th>Total Active</th>
+                    <th>Average Active</th>
+                    <th>Pace</th>
+                    <th colspan="2">Score</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{ session.total_questions }}</td>
+                    <td>{{ session.total_active_seconds | round(2) }}s</td>
+                    <td>{{ session.avg_active_mmss }}</td>
+                    <td><span class="emoji">{{ session.pace_emoji }}</span> {{ session.pace_label }}</td>
+                    <td colspan="2">{{ session.score }}</td>
+                </tr>
+                <tr>
+                    <th>#</th>
+                    <th>Started</th>
+                    <th>Ended</th>
+                    <th>Active</th>
+                    <th>Δ vs Target</th>
+                    <th>Raw Seconds</th>
+                </tr>
+                {% for q in session.questions %}
+                <tr>
+                    <td>{{ q.index }}</td>
+                    <td>{{ q.started_at.strftime("%H:%M:%S") }}</td>
+                    <td>{{ q.ended_at.strftime("%H:%M:%S") }}</td>
+                    <td>{{ q.active_mmss }}</td>
+                    <td>{{ q.over_under_target_mmss }}</td>
+                    <td>{{ q.raw_seconds }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endfor %}
+</section>
+</body>
+</html>

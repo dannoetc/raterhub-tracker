@@ -358,6 +358,14 @@ def get_user_tz(user: User) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+def get_user_display_name(user: User) -> str:
+    first = (getattr(user, "first_name", "") or "").strip()
+    last = (getattr(user, "last_name", "") or "").strip()
+    if first or last:
+        return f"{first} {last}".strip()
+    return getattr(user, "email", None) or getattr(user, "external_id", "User")
+
+
 def to_user_local(dt: Optional[datetime], user: User) -> Optional[datetime]:
     if dt is None:
         return None
@@ -1335,6 +1343,68 @@ def download_weekly_report(
     }
 
     return Response(content=csv_content, media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/reports/daily.pdf")
+def download_daily_pdf(
+    date: str = Query(
+        ..., description="Date in YYYY-MM-DD (user's local timezone)",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    from app.services.reporting import build_daily_report
+    from app.services.report_exports import daily_report_to_pdf
+
+    report = build_daily_report(db, current_user.id, target_date)
+    pdf_bytes = daily_report_to_pdf(
+        report,
+        user_name=get_user_display_name(current_user),
+        user_timezone=getattr(current_user, "timezone", "UTC"),
+    )
+
+    filename = f"daily_report_{target_date.date().isoformat()}.pdf"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@app.get("/reports/weekly.pdf")
+def download_weekly_pdf(
+    week_start: str = Query(
+        ..., description="Week start in YYYY-MM-DD (user's local timezone)",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    try:
+        start_date = datetime.strptime(week_start, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    from app.services.reporting import build_weekly_report
+    from app.services.report_exports import weekly_report_to_pdf
+
+    report = build_weekly_report(db, current_user.id, start_date)
+    pdf_bytes = weekly_report_to_pdf(
+        report,
+        user_name=get_user_display_name(current_user),
+        user_timezone=getattr(current_user, "timezone", "UTC"),
+    )
+
+    filename = f"weekly_report_{start_date.date().isoformat()}.pdf"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 # ============================================================
 # Session / question delete (API & HTML)
