@@ -35,6 +35,7 @@ from .db_models import (
     Question,
     PasswordHistory,
     LoginAttempt,
+    ReportAudit,
 )
 from .models import (
     EventIn,
@@ -57,6 +58,7 @@ from .auth import (
     validate_password_policy,
 )
 from .config import settings
+from .services.audit import log_report_event
 
 # ============================================================
 # FastAPI initialization
@@ -1315,6 +1317,15 @@ def download_daily_report(
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
 
+    log_report_event(
+        db,
+        user_id=current_user.id,
+        report_scope="daily",
+        report_format="csv",
+        report_date=target_date.date(),
+        triggered_by="user_download",
+    )
+
     return Response(content=csv_content, media_type="text/csv; charset=utf-8", headers=headers)
 
 
@@ -1341,6 +1352,15 @@ def download_weekly_report(
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
+
+    log_report_event(
+        db,
+        user_id=current_user.id,
+        report_scope="weekly",
+        report_format="csv",
+        report_date=start_date.date(),
+        triggered_by="user_download",
+    )
 
     return Response(content=csv_content, media_type="text/csv; charset=utf-8", headers=headers)
 
@@ -1373,6 +1393,15 @@ def download_daily_pdf(
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
 
+    log_report_event(
+        db,
+        user_id=current_user.id,
+        report_scope="daily",
+        report_format="pdf",
+        report_date=target_date.date(),
+        triggered_by="user_download",
+    )
+
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
@@ -1403,6 +1432,15 @@ def download_weekly_pdf(
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
+
+    log_report_event(
+        db,
+        user_id=current_user.id,
+        report_scope="weekly",
+        report_format="pdf",
+        report_date=start_date.date(),
+        triggered_by="user_download",
+    )
 
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
@@ -1743,6 +1781,7 @@ def profile_form(
             "user": current_user,
             "timezone_options": _timezone_options(current_user.timezone or "UTC"),
             "selected_timezone": current_user.timezone or "UTC",
+            "email_reports_supported": settings.EMAIL_SENDING_ENABLED,
         },
     )
 
@@ -1755,6 +1794,7 @@ def profile_update(
     first_name: str = Form(""),
     last_name: str = Form(""),
     timezone_name: str = Form(""),
+    wants_report_emails: Optional[bool] = Form(None),
     current_password: Optional[str] = Form(None),
     new_password: Optional[str] = Form(None),
     new_password_confirm: Optional[str] = Form(None),
@@ -1774,6 +1814,11 @@ def profile_update(
         current_user.timezone = _coerce_timezone(
             timezone_name or (current_user.timezone or "UTC")
         )
+
+        if settings.EMAIL_SENDING_ENABLED:
+            current_user.wants_report_emails = bool(wants_report_emails)
+        else:
+            current_user.wants_report_emails = False
 
         db.commit()
         db.refresh(current_user)
@@ -1822,6 +1867,7 @@ def profile_update(
         "user": current_user,
         "timezone_options": _timezone_options(current_user.timezone or "UTC"),
         "selected_timezone": current_user.timezone or "UTC",
+        "email_reports_supported": settings.EMAIL_SENDING_ENABLED,
         "profile_message": profile_message,
         "profile_error": profile_error,
         "password_message": password_message,

@@ -164,7 +164,24 @@ DATABASE_URL=postgresql+psycopg2://raterhub:super-secret@localhost:5432/raterhub
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 ALLOWED_ORIGINS=https://raterhub.com,https://api.raterhub.com
 DEBUG=false
+EMAIL_SENDING_ENABLED=false
+EMAIL_SMTP_HOST=smtp.yourmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_USERNAME=mailer
+EMAIL_SMTP_PASSWORD=super-secret
+EMAIL_FROM_ADDRESS=reports@example.com
 ```
+
+To deliver daily report emails at the start of each user's local day, schedule
+the cron-friendly task to run hourly:
+
+```bash
+python -m app.scripts.deliver_reports
+```
+
+When `EMAIL_SENDING_ENABLED` is `true`, active users who opt in from their
+profile will receive the previous day's PDF and CSV exports. Audit entries are
+recorded for each delivery attempt.
 
 ---
 
