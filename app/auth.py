@@ -136,6 +136,7 @@ def create_access_token(user: "User") -> str:
     to_encode = {
         "sub": str(user.id),
         "email": user.email,
+        "role": getattr(user, "role", "user"),
         "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     }
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")

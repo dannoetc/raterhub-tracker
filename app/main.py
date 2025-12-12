@@ -411,6 +411,12 @@ def get_current_user(
 
     return user
 
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if getattr(current_user, "role", "user") != "admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    return current_user
+
 # ============================================================
 # Root & health
 # ============================================================
@@ -467,6 +473,7 @@ def register_api(
         password_hash=get_password_hash(user_in.password),
         auth_provider="local",
         is_active=True,
+        role="user",
     )
     db.add(user)
     db.commit()
@@ -1654,12 +1661,18 @@ def delete_question_web(
 
 @app.get("/admin/debug/user-sessions")
 def debug_user_sessions(
-    current_user: User = Depends(get_current_user),
+    user_id: Optional[int] = Query(None),
+    current_user: User = Depends(require_admin),
     db: OrmSession = Depends(get_db),
 ):
+    target_user_id = user_id if user_id is not None else current_user.id
+    target_user = db.query(User).filter(User.id == target_user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     sessions = (
         db.query(DbSession)
-        .filter(DbSession.user_id == current_user.id)
+        .filter(DbSession.user_id == target_user_id)
         .order_by(DbSession.started_at.desc())
         .all()
     )
@@ -1679,14 +1692,20 @@ def debug_user_sessions(
 @app.get("/admin/debug/user-events/{session_public_id}")
 def debug_user_events(
     session_public_id: str,
-    current_user: User = Depends(get_current_user),
+    user_id: Optional[int] = Query(None),
+    current_user: User = Depends(require_admin),
     db: OrmSession = Depends(get_db),
 ):
+    target_user_id = user_id if user_id is not None else current_user.id
+    target_user = db.query(User).filter(User.id == target_user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     session = (
         db.query(DbSession)
         .filter(
             DbSession.public_id == session_public_id,
-            DbSession.user_id == current_user.id,
+            DbSession.user_id == target_user_id,
         )
         .first()
     )
@@ -1714,12 +1733,18 @@ def debug_user_events(
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 def admin_dashboard(
     request: Request,
-    current_user: User = Depends(get_current_user),
+    user_id: Optional[int] = Query(None),
+    current_user: User = Depends(require_admin),
     db: OrmSession = Depends(get_db),
 ):
+    target_user_id = user_id if user_id is not None else current_user.id
+    target_user = db.query(User).filter(User.id == target_user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     sessions = (
         db.query(DbSession)
-        .filter(DbSession.user_id == current_user.id)
+        .filter(DbSession.user_id == target_user_id)
         .order_by(DbSession.started_at.desc())
         .limit(20)
         .all()
@@ -1731,6 +1756,7 @@ def admin_dashboard(
             "request": request,
             "sessions": sessions,
             "user": current_user,
+            "target_user": target_user,
         },
     )
 

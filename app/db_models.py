@@ -35,6 +35,7 @@ class User(Base):
     auth_provider = Column(String, nullable=False, default="local")
     google_sub = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
+    role = Column(String, nullable=False, default="user")
 
     # NEW: user timezone (IANA string, e.g. "America/Denver")
     timezone = Column(String, nullable=False, default="UTC")
