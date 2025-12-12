@@ -119,6 +119,7 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     user_id: int
     email: EmailStr
+    role: str = "user"
 
 
 class UserCreate(BaseModel):

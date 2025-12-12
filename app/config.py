@@ -38,4 +38,12 @@ class Settings:
         if origin:
             ALLOWED_ORIGINS.append(origin)
 
+    # Email delivery
+    EMAIL_SENDING_ENABLED = _env_flag("EMAIL_SENDING_ENABLED", default=False)
+    EMAIL_SMTP_HOST = os.getenv("EMAIL_SMTP_HOST")
+    EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", 587))
+    EMAIL_SMTP_USERNAME = os.getenv("EMAIL_SMTP_USERNAME")
+    EMAIL_SMTP_PASSWORD = os.getenv("EMAIL_SMTP_PASSWORD")
+    EMAIL_FROM_ADDRESS = os.getenv("EMAIL_FROM_ADDRESS", "reports@example.com")
+
 settings = Settings()

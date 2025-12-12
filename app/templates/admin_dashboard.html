@@ -1,127 +1,414 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Admin Debug Dashboard</title>
+{% extends "base.html" %}
+{% block title %}Admin Console – RaterHub Tracker{% endblock %}
 
-    <style>
-        body {
-            font-family: system-ui, sans-serif;
-            margin: 24px;
-            background: #faf8ff;
-        }
+{% block content %}
+<style>
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+    }
 
-        h1 {
-            color: #4b3b86;
-            margin-bottom: 6px;
-        }
+    .page-header a {
+        color: var(--accent);
+        font-size: 13px;
+        text-decoration: none;
+        font-weight: 600;
+    }
 
-        .subtitle {
-            color: #666;
-            margin-bottom: 20px;
-        }
+    .page-header a:hover {
+        color: var(--accent-dark);
+        text-decoration: underline;
+    }
 
-        table {
-            border-collapse: collapse;
-            width: 420px;
-            margin-bottom: 30px;
-            background: #fff;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-        }
+    .grid {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr;
+        gap: 16px;
+    }
 
-        th, td {
-            padding: 10px 14px;
-            border-bottom: 1px solid #eee;
-        }
+    .full-width {
+        grid-column: 1 / -1;
+    }
 
-        th {
-            background: #f0eaff;
-            text-align: left;
-        }
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
 
-        tr:hover {
-            background: #f7f3ff;
-            cursor: pointer;
-        }
+    .hint {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
 
-        #events-box {
-            background: #fff;
-            padding: 16px;
-            border-radius: 10px;
-            width: 600px;
-            max-height: 600px;
-            overflow-y: auto;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-        }
+    .form-field {
+        margin-bottom: 10px;
+    }
 
-        pre {
-            white-space: pre-wrap;
-            font-size: 13px;
-            line-height: 1.3em;
-        }
-    </style>
-</head>
+    .form-field label {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 6px;
+        font-weight: 600;
+        color: var(--accent-dark);
+    }
 
-<body>
+    .input, select {
+        width: 100%;
+        padding: 9px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border-subtle);
+        font-size: 14px;
+        box-sizing: border-box;
+        background: #fff;
+    }
 
-<h1>Admin Debug Dashboard</h1>
-<div class="subtitle">Welcome, {{ user.email }} — click a session to view raw events.</div>
+    .input-inline {
+        display: inline-block;
+        width: auto;
+        min-width: 180px;
+    }
 
-<h2>Recent Sessions</h2>
+    .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+    }
 
-<table>
-    <tr>
-        <th>Session ID</th>
-        <th>Started</th>
-        <th>Ended</th>
-    </tr>
+    .btn {
+        border: none;
+        border-radius: 10px;
+        padding: 9px 12px;
+        font-weight: 700;
+        cursor: pointer;
+        font-size: 13px;
+    }
 
-    {% for s in sessions %}
-    <tr onclick="loadEvents('{{ s.public_id }}')">
-        <td>{{ s.public_id }}</td>
-        <td>{{ s.started_at }}</td>
-        <td>{{ s.ended_at }}</td>
-    </tr>
-    {% endfor %}
-</table>
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-secondary { background: #f5f1ff; color: var(--accent-dark); border: 1px solid var(--border-subtle); }
+    .btn-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecdd3; }
 
-<h2>Session Event Log</h2>
-<div id="events-box">
-    <pre id="events-output">Select a session above to view events.</pre>
+    .alert {
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-bottom: 12px;
+    }
+    .alert-success { background: #ecfdf3; color: #166534; border: 1px solid #bbf7d0; }
+    .alert-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecdd3; }
+
+    table { margin-top: 6px; }
+    th, td { font-size: 12px; }
+
+    .pill-admin { background: #ffe8cc; color: #9a3412; }
+    .pill-user { background: var(--accent-light); color: var(--accent-dark); }
+
+    .event-log {
+        background: var(--card-bg);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        padding: 12px;
+        min-height: 160px;
+        white-space: pre-wrap;
+        font-size: 12px;
+        color: var(--text-main);
+    }
+
+    .stacked-forms form { margin-bottom: 12px; }
+</style>
+
+<div class="page-header">
+    <div>
+        <h1>Admin console</h1>
+        <div class="subtitle">Manage accounts, audit sessions, and trigger reports. Signed in as {{ user.email }}.</div>
+    </div>
+    <div>
+        <a href="/dashboard/today">← Back to dashboard</a>
+    </div>
+</div>
+
+{% if flash_message %}
+    <div class="alert alert-success">{{ flash_message }}</div>
+{% endif %}
+{% if flash_error %}
+    <div class="alert alert-error">{{ flash_error }}</div>
+{% endif %}
+
+<div class="grid">
+    <div class="card">
+        <div class="section-header">
+            <h2>Create a new user</h2>
+            <span class="hint">Passwords must meet policy requirements.</span>
+        </div>
+        <form method="post" action="/admin/users/manage">
+            <input type="hidden" name="form_type" value="create">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="view_user_id" value="{{ target_user.id if target_user else '' }}">
+
+            <div class="form-field">
+                <label for="new_email">Email</label>
+                <input class="input" id="new_email" name="email" type="email" required>
+            </div>
+            <div class="form-field">
+                <label for="new_first_name">First name</label>
+                <input class="input" id="new_first_name" name="first_name" type="text">
+            </div>
+            <div class="form-field">
+                <label for="new_last_name">Last name</label>
+                <input class="input" id="new_last_name" name="last_name" type="text">
+            </div>
+            <div class="form-field">
+                <label for="new_role">Role</label>
+                <select id="new_role" name="role">
+                    <option value="user">Standard user</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="new_password">Password</label>
+                <input class="input" id="new_password" name="password" type="password" required>
+            </div>
+            <div class="form-field">
+                <label for="new_password_confirm">Confirm password</label>
+                <input class="input" id="new_password_confirm" name="password_confirm" type="password" required>
+            </div>
+            <div class="form-field">
+                <label for="new_is_active">Activation</label>
+                <select id="new_is_active" name="is_active">
+                    <option value="true" selected>Active</option>
+                    <option value="false">Inactive</option>
+                </select>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" type="submit">Create account</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="section-header">
+            <h2>Account controls</h2>
+            <span class="hint">Select a user to manage their account.</span>
+        </div>
+
+        <form id="view-user-form" method="get" action="/admin/dashboard" class="form-field">
+            <label for="view_user_id">Focus user</label>
+            <select id="view_user_id" name="user_id" onchange="document.getElementById('view-user-form').submit()">
+                {% for u in users %}
+                    <option value="{{ u.id }}" {% if target_user and u.id == target_user.id %}selected{% endif %}>
+                        {{ u.email }} {% if u.role == 'admin' %}(admin){% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+        </form>
+
+        {% if target_user %}
+        <div class="stacked-forms">
+            <form method="post" action="/admin/users/manage">
+                <input type="hidden" name="form_type" value="activation">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                <input type="hidden" name="view_user_id" value="{{ target_user.id }}">
+                <input type="hidden" name="is_active" value="{% if target_user.is_active %}false{% else %}true{% endif %}">
+                <div class="actions">
+                    <div class="hint">Status: {% if target_user.is_active %}<span class="pill">Active</span>{% else %}<span class="pill">Inactive</span>{% endif %}</div>
+                    <button class="btn btn-secondary" type="submit">
+                        {% if target_user.is_active %}Deactivate{% else %}Activate{% endif %}
+                    </button>
+                </div>
+            </form>
+
+            <form method="post" action="/admin/users/manage">
+                <input type="hidden" name="form_type" value="reset_password">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                <input type="hidden" name="view_user_id" value="{{ target_user.id }}">
+                <div class="form-field">
+                    <label for="reset_password">New password for {{ target_user.email }}</label>
+                    <input class="input" id="reset_password" name="new_password" type="password" required>
+                </div>
+                <div class="form-field">
+                    <label for="reset_password_confirm">Confirm new password</label>
+                    <input class="input" id="reset_password_confirm" name="new_password_confirm" type="password" required>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary" type="submit">Reset password</button>
+                </div>
+            </form>
+
+            <form method="post" action="/admin/users/manage" onsubmit="return confirm('This will delete the user and their sessions. Continue?');">
+                <input type="hidden" name="form_type" value="delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                <input type="hidden" name="view_user_id" value="{{ target_user.id }}">
+                <div class="form-field">
+                    <label for="confirm_email">Type {{ target_user.email }} to confirm deletion</label>
+                    <input class="input" id="confirm_email" name="confirm_email" type="text" required>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-danger" type="submit">Delete account</button>
+                </div>
+            </form>
+        </div>
+        {% else %}
+            <div class="hint">No users available.</div>
+        {% endif %}
+    </div>
+
+    <div class="card full-width">
+        <div class="section-header">
+            <h2>User directory</h2>
+            <span class="hint">Recent accounts with status and roles.</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Last login</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                    <tr {% if target_user and u.id == target_user.id %}style="background:#f3ecff"{% endif %}>
+                        <td>{{ u.email }}</td>
+                        <td>{{ (u.first_name or '') ~ ' ' ~ (u.last_name or '') }}</td>
+                        <td>
+                            <span class="pill {% if u.role == 'admin' %}pill-admin{% else %}pill-user{% endif %}">{{ u.role|capitalize }}</span>
+                        </td>
+                        <td>{% if u.is_active %}Active{% else %}Inactive{% endif %}</td>
+                        <td>{{ u.created_at }}</td>
+                        <td>{{ u.last_login_at or '—' }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card full-width">
+        <div class="section-header">
+            <h2>Diagnostics</h2>
+            <span class="hint">Inspect sessions/events and trigger report exports for admins only.</span>
+        </div>
+
+        {% if target_user %}
+        <div class="grid" style="grid-template-columns: 1.1fr 1fr; gap: 12px;">
+            <div>
+                <h3>Recent sessions for {{ target_user.email }}</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Session</th>
+                            <th>Started</th>
+                            <th>Ended</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in sessions %}
+                            <tr onclick="loadEvents('{{ s.public_id }}')" style="cursor:pointer;">
+                                <td>{{ s.public_id }}</td>
+                                <td>{{ s.started_at }}</td>
+                                <td>{{ s.ended_at or '—' }}</td>
+                            </tr>
+                        {% endfor %}
+                        {% if sessions|length == 0 %}
+                            <tr><td colspan="3">No sessions found.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            <div>
+                <h3>Event log</h3>
+                <div id="events-output" class="event-log">Select a session to view its events.</div>
+            </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px;">
+            <div>
+                <h3>Report downloads</h3>
+                <form method="get" action="/admin/reports/daily.csv" class="form-field">
+                    <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                    <label for="daily_date">Daily CSV date</label>
+                    <input class="input" id="daily_date" name="date" type="date" data-fill-today>
+                    <div class="actions">
+                        <button class="btn btn-secondary" type="submit">Download daily CSV</button>
+                    </div>
+                </form>
+                <form method="get" action="/admin/reports/weekly.csv" class="form-field">
+                    <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                    <label for="weekly_start">Week start (CSV)</label>
+                    <input class="input" id="weekly_start" name="week_start" type="date" data-fill-today>
+                    <div class="actions">
+                        <button class="btn btn-secondary" type="submit">Download weekly CSV</button>
+                    </div>
+                </form>
+            </div>
+            <div>
+                <h3>PDF exports</h3>
+                <form method="get" action="/admin/reports/daily.pdf" class="form-field">
+                    <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                    <label for="daily_pdf_date">Daily PDF date</label>
+                    <input class="input" id="daily_pdf_date" name="date" type="date" data-fill-today>
+                    <div class="actions">
+                        <button class="btn btn-secondary" type="submit">Download daily PDF</button>
+                    </div>
+                </form>
+                <form method="get" action="/admin/reports/weekly.pdf" class="form-field">
+                    <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                    <label for="weekly_pdf_start">Week start (PDF)</label>
+                    <input class="input" id="weekly_pdf_start" name="week_start" type="date" data-fill-today>
+                    <div class="actions">
+                        <button class="btn btn-secondary" type="submit">Download weekly PDF</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% else %}
+            <div class="hint">No user selected for diagnostics.</div>
+        {% endif %}
+    </div>
 </div>
 
 <script>
-async function loadEvents(sessionId) {
-    const output = document.getElementById("events-output");
-    output.textContent = "Loading...";
+    const targetUserId = {{ target_user.id if target_user else 'null' }};
 
-    try {
-        const res = await fetch(`/admin/debug/user-events/${sessionId}`);
-        if (!res.ok) {
-            output.textContent = "Error loading events: " + res.statusText;
+    function loadEvents(sessionId) {
+        if (!targetUserId) {
             return;
         }
-
-        const data = await res.json();
-
-        if (!Array.isArray(data) || data.length === 0) {
-            output.textContent = "No events for this session.";
-            return;
-        }
-
-        let text = "";
-        for (const e of data) {
-            text += `[${e.timestamp}] ${e.type} (event #${e.id})\n`;
-        }
-
-        output.textContent = text;
-    } catch (err) {
-        output.textContent = "Fetch error: " + err;
+        const output = document.getElementById('events-output');
+        output.textContent = 'Loading...';
+        fetch(`/admin/debug/user-events/${sessionId}?user_id=${targetUserId}`)
+            .then(res => {
+                if (!res.ok) { throw new Error(res.statusText || 'Error'); }
+                return res.json();
+            })
+            .then(data => {
+                if (!Array.isArray(data) || data.length === 0) {
+                    output.textContent = 'No events for this session.';
+                    return;
+                }
+                const lines = data.map(e => `[${e.timestamp}] ${e.type} (event #${e.id})`);
+                output.textContent = lines.join('\n');
+            })
+            .catch(err => {
+                output.textContent = 'Error loading events: ' + err;
+            });
     }
-}
-</script>
 
-</body>
-</html>
+    document.querySelectorAll('[data-fill-today]').forEach((input) => {
+        if (!input.value) {
+            const today = new Date().toISOString().slice(0, 10);
+            input.value = today;
+        }
+    });
+</script>
+{% endblock %}

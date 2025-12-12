@@ -1,6 +1,6 @@
 # 💜 RaterHub Tracker
 
-RaterHub Tracker is a lightweight, privacy-conscious time tracker designed specifically for Raters working on [RaterHub.com](https://www.raterhub.com). It helps track question timing and session activity using a browser widget and a FastAPI backend — no browser extensions or third-party logins required.
+RaterHub Tracker is a lightweight, privacy-conscious time tracker designed specifically for Raters working on [RaterHub.com](https://www.raterhub.com). It helps track question timing and session activity using a browser widget and a FastAPI backend, with a lightweight browser extension working things in the frontend! 
 
 ---
 
@@ -18,7 +18,7 @@ RaterHub Tracker is a lightweight, privacy-conscious time tracker designed speci
 
 - **Backend**: FastAPI + SQLAlchemy + PostgreSQL (or SQLite)
 - **Auth**: JWT Bearer tokens, CSRF, optional rate limiting (SlowAPI)
-- **Frontend**: TamperMonkey widget + Jinja2 HTML templates
+- **Frontend**: Browser Extension (code in /extension) + Jinja2 HTML templates
 - **Packaging**: Docker, `.env` support, Makefile for quick builds
 
 ---
@@ -154,6 +154,36 @@ source app/.venv/bin/activate
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+### Database migrations for email features
+
+If you are upgrading an existing deployment, run the lightweight migration to
+add the email-related audit table and user preference columns:
+
+```bash
+SECRET_KEY=... DATABASE_URL=... python scripts/add_report_email_tables.py
+```
+
+The script is idempotent and can be re-run safely; it only creates the
+`report_audit_logs` table and missing `users.timezone`/`users.wants_report_emails`
+columns when they are absent.
+
+### PDF rendering options
+
+PDF exports prefer WeasyPrint for full HTML rendering. If you see raw HTML or CSS
+in the generated PDF, install WeasyPrint's system dependencies so the renderer
+can load fonts and CSS correctly (Debian/Ubuntu example):
+
+```bash
+apt-get update && apt-get install -y libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info
+```
+
+When those libraries are unavailable, the service falls back to a text-only PDF
+that strips tags and styling. If you need pixel-perfect HTML output in a
+minimal environment, you can also replace the `_weasyprint_render` helper in
+`app/services/report_exports.py` with a `wkhtmltopdf` or headless-Chromium
+command that writes PDF bytes to stdout—the rest of the code simply expects the
+rendered bytes.
+
 ---
 
 ## 🔐 Environment Configuration (`.env`)
@@ -164,7 +194,24 @@ DATABASE_URL=postgresql+psycopg2://raterhub:super-secret@localhost:5432/raterhub
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 ALLOWED_ORIGINS=https://raterhub.com,https://api.raterhub.com
 DEBUG=false
+EMAIL_SENDING_ENABLED=false
+EMAIL_SMTP_HOST=smtp.yourmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_USERNAME=mailer
+EMAIL_SMTP_PASSWORD=super-secret
+EMAIL_FROM_ADDRESS=reports@example.com
 ```
+
+To deliver daily report emails at the start of each user's local day, schedule
+the cron-friendly task to run hourly:
+
+```bash
+python -m app.scripts.deliver_reports
+```
+
+When `EMAIL_SENDING_ENABLED` is `true`, active users who opt in from their
+profile will receive the previous day's PDF and CSV exports. Audit entries are
+recorded for each delivery attempt.
 
 ---
 

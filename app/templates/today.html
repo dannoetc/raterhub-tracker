@@ -86,14 +86,6 @@
             margin-bottom: 24px;
         }
 
-        .summary-card {
-            background: var(--card-bg);
-            border-radius: 14px;
-            padding: 14px 16px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-            border: 1px solid var(--border-subtle);
-        }
-
         .wide-card {
             background: var(--card-bg);
             border-radius: 14px;
@@ -101,6 +93,14 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.06);
             border: 1px solid var(--border-subtle);
             margin-bottom: 18px;
+        }
+
+        .summary-card {
+            background: var(--card-bg);
+            border-radius: 14px;
+            padding: 14px 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            border: 1px solid var(--border-subtle);
         }
 
         .summary-label {
@@ -366,8 +366,11 @@
     <div class="nav-right">
         <span class="nav-user">Logged in as {{ current_user_email or 'Unknown user' }}</span>
         <a href="/dashboard/today">Today</a>
+        <a href="/dashboard/reports">Reports</a>
+        {% if is_admin %}
         <a href="/admin/dashboard">Admin</a>
-                <a href="/profile">Preferences</a>
+        {% endif %}
+        <a href="/profile">Preferences</a>
         <a href="/logout">Logout</a>
     </div>
 </div>
@@ -386,6 +389,7 @@
             <input
                 type="date"
                 name="date"
+                id="date-picker"
                 value="{{ selected_date if selected_date else (summary.date.strftime('%Y-%m-%d') if summary.date else '') }}"
                 style="padding: 4px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px;"
             >
@@ -408,7 +412,6 @@
             Go
         </button>
     </form>
-    <p class="subtitle" style="margin-top: 0;">Times shown in {{ user_timezone or 'UTC' }}.</p>
 
     <!-- Top summary cards -->
     <div class="summary-grid">
@@ -497,7 +500,7 @@
             No activity recorded yet today. Once you start rating tasks, your sessions will show up here.
         </div>
     {% else %}
-        <div class="sessions-list">
+<div class="sessions-list">
             {% for s in summary.sessions %}
                 <div class="session-card">
                     <div class="session-header">
@@ -571,6 +574,77 @@
 </div>
 
 <script>
+    const dateInput = document.getElementById('date-picker');
+    const fallbackDate = "{{ selected_date if selected_date else (summary.date.strftime('%Y-%m-%d') if summary.date else '') }}";
+
+    function getSelectedDateIso() {
+        return (dateInput && dateInput.value) || fallbackDate || '';
+    }
+
+    function computeWeekStart(dateIso) {
+        const [year, month, day] = dateIso.split('-').map((value) => Number.parseInt(value, 10));
+        if (!year || !month || !day) return '';
+        const date = new Date(Date.UTC(year, month - 1, day));
+        const weekday = date.getUTCDay();
+        const daysSinceMonday = (weekday + 6) % 7;
+        date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+        return date.toISOString().slice(0, 10);
+    }
+
+    function computeWeekRange(dateIso) {
+        const startIso = computeWeekStart(dateIso);
+        if (!startIso) return { start: '', end: '' };
+        const [year, month, day] = startIso.split('-').map((value) => Number.parseInt(value, 10));
+        const endDate = new Date(Date.UTC(year, month - 1, day));
+        endDate.setUTCDate(endDate.getUTCDate() + 6);
+        const endIso = endDate.toISOString().slice(0, 10);
+        return { start: startIso, end: endIso };
+    }
+
+    function updateReportLabels() {
+        const dateIso = getSelectedDateIso();
+        const dailyLabel = document.getElementById('daily-date-label');
+        const weeklyLabel = document.getElementById('weekly-range-label');
+
+        if (dailyLabel) {
+            dailyLabel.textContent = dateIso || 'select a date first';
+        }
+
+        if (weeklyLabel) {
+            const range = computeWeekRange(dateIso);
+            weeklyLabel.textContent = range.start && range.end ? `${range.start} – ${range.end}` : 'select a date first';
+        }
+    }
+
+    function downloadReport(scope, format) {
+        const dateIso = getSelectedDateIso();
+        if (!dateIso) {
+            alert('Pick a date to export your reports.');
+            return;
+        }
+
+        const params = new URLSearchParams();
+        if (scope === 'daily') {
+            params.set('date', dateIso);
+        } else {
+            const weekStart = computeWeekStart(dateIso);
+            if (!weekStart) {
+                alert('Could not determine the start of that week.');
+                return;
+            }
+            params.set('week_start', weekStart);
+        }
+
+        window.location.href = `/reports/${scope}.${format}?${params.toString()}`;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (dateInput) {
+            dateInput.addEventListener('change', updateReportLabels);
+        }
+        updateReportLabels();
+    });
+
     (function() {
         const tooltip = document.getElementById('sparkline-tooltip');
         const axis = document.getElementById('sparkline-axis');
