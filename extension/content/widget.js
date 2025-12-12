@@ -38,6 +38,10 @@
     sessionStatsEl,
     resizeObserver;
 
+  // Track expanded sizing so collapse can shrink the widget footprint
+  let expandedMinHeight = null;
+  let expandedHeight = null;
+
   // --- Drag state ---
   let isDragging = false;
   let dragStartMouseX = 0;
@@ -161,6 +165,14 @@
     if (isCollapsed) {
       bodyContainer.style.display = "none";
       toggleBtn.textContent = "▴";
+      if (!expandedMinHeight) {
+        expandedMinHeight = widget.style.minHeight;
+      }
+      if (!expandedHeight) {
+        expandedHeight = widget.style.height;
+      }
+      widget.style.minHeight = "0";
+      widget.style.height = "auto";
       if (collapsedTimerEl) {
         collapsedTimerEl.style.display = "inline-flex";
         collapsedTimerEl.style.alignItems = "center";
@@ -168,6 +180,8 @@
     } else {
       bodyContainer.style.display = "block";
       toggleBtn.textContent = "▾";
+      widget.style.minHeight = expandedMinHeight || "200px";
+      widget.style.height = expandedHeight || "";
       if (collapsedTimerEl) {
         collapsedTimerEl.style.display = "none";
       }
