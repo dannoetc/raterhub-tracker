@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     UniqueConstraint,
+    Date,
 )
 from sqlalchemy.orm import relationship, declarative_base
 
@@ -37,6 +38,9 @@ class User(Base):
 
     # NEW: user timezone (IANA string, e.g. "America/Denver")
     timezone = Column(String, nullable=False, default="UTC")
+
+    # Email preferences
+    wants_report_emails = Column(Boolean, nullable=False, default=False)
 
     # Relationships
     sessions = relationship(
@@ -147,3 +151,18 @@ class LoginAttempt(Base):
     locked_until = Column(DateTime, nullable=True)
 
     __table_args__ = (UniqueConstraint("key_type", "key_value", name="uix_login_attempt_key"),)
+
+
+class ReportAudit(Base):
+    __tablename__ = "report_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    report_scope = Column(String, nullable=False)  # "daily" or "weekly"
+    report_format = Column(String, nullable=False)  # "csv", "pdf", or "email"
+    report_date = Column(Date, nullable=False)
+    triggered_by = Column(String, nullable=False)  # "user_download" or "scheduler"
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    details = Column(String, nullable=True)
+
+    user = relationship("User")

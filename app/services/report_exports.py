@@ -115,9 +115,11 @@ def _render_template(name: str, context: dict) -> str:
 
 
 def _html_to_plain_text(html: str) -> str:
-    cleaned = re.sub(r"(?i)<br\s*/?>", "\n", html)
+    cleaned = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", html)
+    cleaned = re.sub(r"(?i)<br\s*/?>", "\n", cleaned)
     cleaned = re.sub(r"(?i)</(p|div|section|table|thead|tbody|tr|h[1-6])>", "\n", cleaned)
     cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    cleaned = re.sub(r"[\t ]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{2,}", "\n", cleaned)
     return cleaned.strip()
 

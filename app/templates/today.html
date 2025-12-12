@@ -86,14 +86,6 @@
             margin-bottom: 24px;
         }
 
-        .summary-card {
-            background: var(--card-bg);
-            border-radius: 14px;
-            padding: 14px 16px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-            border: 1px solid var(--border-subtle);
-        }
-
         .wide-card {
             background: var(--card-bg);
             border-radius: 14px;
@@ -101,6 +93,14 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.06);
             border: 1px solid var(--border-subtle);
             margin-bottom: 18px;
+        }
+
+        .summary-card {
+            background: var(--card-bg);
+            border-radius: 14px;
+            padding: 14px 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            border: 1px solid var(--border-subtle);
         }
 
         .summary-label {
@@ -366,6 +366,7 @@
     <div class="nav-right">
         <span class="nav-user">Logged in as {{ current_user_email or 'Unknown user' }}</span>
         <a href="/dashboard/today">Today</a>
+        <a href="/dashboard/reports">Reports</a>
         <a href="/admin/dashboard">Admin</a>
                 <a href="/profile">Preferences</a>
         <a href="/logout">Logout</a>
@@ -386,6 +387,7 @@
             <input
                 type="date"
                 name="date"
+                id="date-picker"
                 value="{{ selected_date if selected_date else (summary.date.strftime('%Y-%m-%d') if summary.date else '') }}"
                 style="padding: 4px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px;"
             >
@@ -497,7 +499,7 @@
             No activity recorded yet today. Once you start rating tasks, your sessions will show up here.
         </div>
     {% else %}
-        <div class="sessions-list">
+<div class="sessions-list">
             {% for s in summary.sessions %}
                 <div class="session-card">
                     <div class="session-header">
