@@ -5,14 +5,14 @@
     <title>Reports – RaterHub Tracker</title>
     <style>
         :root {
-            --bg: #f7f4ff;
+            --bg: radial-gradient(circle at top left, #fce1ff 0, #f7f3ff 40%, #ffffff 100%);
             --card-bg: #ffffff;
             --accent: #6c5ce7;
-            --accent-soft: #f0eaff;
-            --accent-dark: #4b3b86;
-            --text-main: #2f2940;
-            --text-muted: #7a748f;
-            --border-subtle: #e5defa;
+            --accent-soft: #f3ecff;
+            --accent-dark: #4834d4;
+            --text-main: #2d2440;
+            --text-muted: #6c657e;
+            --border-subtle: #e4ddff;
         }
 
         * { box-sizing: border-box; }
@@ -22,6 +22,7 @@
             background: var(--bg);
             margin: 0;
             padding: 24px;
+            color: var(--text-main);
         }
 
         .page {
@@ -37,7 +38,7 @@
         }
         .nav-logo {
             font-weight: 600;
-            color: #4b3b86;
+            color: var(--accent-dark);
         }
         .nav-right {
             display: flex;
@@ -46,7 +47,7 @@
         }
         .nav-right a {
             font-size: 13px;
-            color: #6c5ce7;
+            color: var(--accent);
             text-decoration: none;
         }
         .nav-right a:hover {
@@ -54,8 +55,8 @@
         }
         .nav-user {
             font-size: 12px;
-            color: #4b3b86;
-            background: #e9e3ff;
+            color: var(--accent-dark);
+            background: var(--accent-soft);
             padding: 6px 10px;
             border-radius: 999px;
         }
@@ -86,8 +87,8 @@
 
         .timezone-pill {
             font-size: 12px;
-            color: #4b3b86;
-            background: #f0eaff;
+            color: var(--accent-dark);
+            background: var(--accent-soft);
             padding: 6px 10px;
             border-radius: 8px;
         }
@@ -175,14 +176,14 @@
     </header>
 
     <form method="get" action="/dashboard/reports" class="report-controls">
-        <label style="font-size: 13px; color: #7a748f; margin-right: 8px;">
+        <label style="font-size: 13px; color: var(--text-muted); margin-right: 8px;">
             Anchor date:
             <input
                 type="date"
                 name="date"
                 id="date-picker"
                 value="{{ selected_date }}"
-                style="padding: 4px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px;"
+                style="padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border-subtle); font-size: 13px;"
             >
         </label>
         <span class="timezone-pill">Timezone: {{ user_timezone or 'UTC' }}</span>
@@ -192,7 +193,7 @@
                 padding: 5px 10px;
                 border-radius: 999px;
                 border: none;
-                background: #6c5ce7;
+                background: var(--accent);
                 color: #fff;
                 font-size: 13px;
                 cursor: pointer;
