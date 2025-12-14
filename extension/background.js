@@ -7,7 +7,9 @@ const AUTH_KEY = "raterhubAuth_v1";
 const STATUS_KEY = "raterhubLastStatus_v1";
 const CREDENTIALS_KEY = "raterhubCredentials_v1";
 const CRYPTO_KEY = "raterhubCredentialsKey_v1";
+const POSITION_KEY = "raterhubTrackerPos_v2";
 const throttleMap = {};
+let promptedForLogin = false;
 
 const MESSAGE_TYPES = {
   CONTROL_EVENT: "SEND_EVENT",
@@ -16,6 +18,7 @@ const MESSAGE_TYPES = {
   SESSION_SUMMARY: "SESSION_SUMMARY",
   RESET_WIDGET_STATE: "RESET_WIDGET_STATE",
   SESSION_SUMMARY_RELAY: "SESSION_SUMMARY_RELAY",
+  RESET_WIDGET_POSITION: "RESET_WIDGET_POSITION",
 };
 
 let authState = {
@@ -113,6 +116,17 @@ function throttle(key, windowMs = 750) {
   }
   throttleMap[key] = now;
   return { throttled: false };
+}
+
+async function promptInteractiveLogin(reason = "LOGIN_REQUIRED") {
+  if (promptedForLogin) return;
+  promptedForLogin = true;
+  setLastStatus(reason === "NO_CREDENTIALS" ? "Sign in to continue" : "Login required");
+  try {
+    await chrome.runtime.openOptionsPage();
+  } catch (err) {
+    console.warn("[RaterHubTracker] Failed to open options page", err);
+  }
 }
 
 function isInternalPage(sender) {
@@ -609,6 +623,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
         return;
       }
+      case MESSAGE_TYPES.RESET_WIDGET_POSITION: {
+        if (!isInternalPage(sender) && sender?.url) {
+          sendResponse({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+        await chrome.storage.local.remove([POSITION_KEY]);
+        try {
+          const tabs = await chrome.tabs.query({ url: "https://*.raterhub.com/*" });
+          for (const tab of tabs) {
+            chrome.tabs
+              .sendMessage(tab.id, buildMessage(MESSAGE_TYPES.RESET_WIDGET_POSITION))
+              .catch(() => {});
+          }
+        } catch (err) {
+          console.warn("[RaterHubTracker] Failed to broadcast position reset", err);
+        }
+        sendResponse(buildMessage(MESSAGE_TYPES.RESET_WIDGET_POSITION, { ok: true }));
+        return;
+      }
       default:
         sendResponse({ ok: false, error: "UNKNOWN_MESSAGE" });
         return;
@@ -623,4 +656,18 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-loadAuthFromStorage();
+(async () => {
+  await loadAuthFromStorage();
+  const creds = await loadStoredCredentials();
+  if (!creds) {
+    await promptInteractiveLogin("NO_CREDENTIALS");
+    return;
+  }
+
+  if (!authState.accessToken) {
+    const res = await login({ silent: true });
+    if (!res.ok) {
+      await promptInteractiveLogin(res.error || "LOGIN_FAILED");
+    }
+  }
+})();

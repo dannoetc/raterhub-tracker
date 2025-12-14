@@ -10,6 +10,7 @@
     SESSION_SUMMARY: "SESSION_SUMMARY",
     SESSION_SUMMARY_RELAY: "SESSION_SUMMARY_RELAY",
     RESET_WIDGET_STATE: "RESET_WIDGET_STATE",
+    RESET_WIDGET_POSITION: "RESET_WIDGET_POSITION",
   };
 
   // --- UI + session state ---
@@ -41,6 +42,7 @@
   // Track expanded sizing so collapse can shrink the widget footprint
   let expandedMinHeight = null;
   let expandedHeight = null;
+  let expandedWidth = null;
 
   // --- Drag state ---
   let isDragging = false;
@@ -86,6 +88,19 @@
     }
   }
 
+  async function resetWidgetPosition() {
+    if (!widget) return;
+    widget.style.left = "";
+    widget.style.top = "";
+    widget.style.right = "12px";
+    widget.style.bottom = "12px";
+    try {
+      await chrome.storage.local.remove([POS_KEY]);
+    } catch (e) {
+      console.warn("[RaterHubTracker] Failed to clear widget position:", e);
+    }
+  }
+
   async function saveState() {
     try {
       const state = {
@@ -104,7 +119,7 @@
   }
 
   async function saveWidgetSize() {
-    if (!widget) return;
+    if (!widget || isCollapsed) return;
     try {
       const rect = widget.getBoundingClientRect();
       await storageSet(SIZE_KEY, { width: rect.width, height: rect.height });
@@ -161,15 +176,19 @@
   // -----------------------------------------
 
   function applyCollapsedState() {
-    if (!bodyContainer || !toggleBtn) return;
+    if (!bodyContainer || !toggleBtn || !widget) return;
     if (isCollapsed) {
       const computed = window.getComputedStyle(widget);
       expandedMinHeight = widget.style.minHeight || computed.minHeight;
       expandedHeight = widget.style.height || computed.height;
+      expandedWidth = widget.style.width || computed.width;
       bodyContainer.style.display = "none";
       toggleBtn.textContent = "▴";
       widget.style.minHeight = "0";
       widget.style.height = "auto";
+      const collapsedWidth = widget.style.minWidth || computed.minWidth || "230px";
+      widget.style.width = collapsedWidth;
+      widget.style.maxWidth = collapsedWidth;
       if (collapsedTimerEl) {
         collapsedTimerEl.style.display = "inline-flex";
         collapsedTimerEl.style.alignItems = "center";
@@ -179,6 +198,8 @@
       toggleBtn.textContent = "▾";
       widget.style.minHeight = expandedMinHeight || "200px";
       widget.style.height = expandedHeight || "";
+      widget.style.width = expandedWidth || "";
+      widget.style.maxWidth = "";
       if (collapsedTimerEl) {
         collapsedTimerEl.style.display = "none";
       }
@@ -413,9 +434,6 @@
     widget.appendChild(header);
     widget.appendChild(bodyContainer);
     document.body.appendChild(widget);
-
-    loadWidgetSize();
-    loadWidgetPosition();
 
     if (typeof ResizeObserver !== "undefined") {
       resizeObserver = new ResizeObserver(() => saveWidgetSize());
@@ -834,6 +852,8 @@
   async function init() {
     createWidget();
     await loadState();
+    await loadWidgetSize();
+    await loadWidgetPosition();
     updateQuestionDisplay();
     restoreTimerFromState();
     applyCollapsedState();
@@ -862,6 +882,9 @@
           currentSessionId = message.sessionId;
         }
         applySessionSummary(message.summary);
+      }
+      if (message?.type === MESSAGE_TYPES.RESET_WIDGET_POSITION) {
+        resetWidgetPosition();
       }
     });
 

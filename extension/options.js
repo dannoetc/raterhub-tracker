@@ -123,16 +123,6 @@ async function triggerLogin() {
   }
 }
 
-async function testLogin() {
-  showStatus("Testing login…");
-  const res = await chrome.runtime.sendMessage({ type: "LOGIN", silent: true });
-  if (res?.ok) {
-    showStatus("Login successful.", "success");
-  } else {
-    showStatus("Login failed.", "error");
-  }
-}
-
 async function logout() {
   showStatus("Clearing stored data…");
   await chrome.runtime.sendMessage({ type: "LOGOUT_RESET" });
@@ -145,6 +135,16 @@ async function logout() {
   showStatus("Credentials and tokens cleared.", "success");
 }
 
+async function clearWidgetPosition() {
+  showStatus("Resetting widget position…");
+  const res = await chrome.runtime.sendMessage({ type: "RESET_WIDGET_POSITION" });
+  if (res?.ok) {
+    showStatus("Widget position cleared. It will return to default on next load.", "success");
+  } else {
+    showStatus("Unable to reset widget position.", "error");
+  }
+}
+
 // ============================================================
 // Wire up UI events
 // ============================================================
@@ -153,8 +153,8 @@ modeRadios.forEach((radio) => radio.addEventListener("change", toggleFieldVisibi
 document.getElementById("save").addEventListener("click", save);
 document.getElementById("request-refresh").addEventListener("click", requestRefreshToken);
 document.getElementById("login").addEventListener("click", triggerLogin);
-document.getElementById("test-login").addEventListener("click", testLogin);
 document.getElementById("logout").addEventListener("click", logout);
+document.getElementById("reset-position").addEventListener("click", clearWidgetPosition);
 
 document.addEventListener("DOMContentLoaded", () => {
   toggleFieldVisibility();
