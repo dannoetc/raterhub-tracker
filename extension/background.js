@@ -9,6 +9,7 @@ const CREDENTIALS_KEY = "raterhubCredentials_v1";
 const CRYPTO_KEY = "raterhubCredentialsKey_v1";
 const POSITION_KEY = "raterhubTrackerPos_v2";
 const throttleMap = {};
+let promptedForLogin = false;
 
 const MESSAGE_TYPES = {
   CONTROL_EVENT: "SEND_EVENT",
@@ -115,6 +116,17 @@ function throttle(key, windowMs = 750) {
   }
   throttleMap[key] = now;
   return { throttled: false };
+}
+
+async function promptInteractiveLogin(reason = "LOGIN_REQUIRED") {
+  if (promptedForLogin) return;
+  promptedForLogin = true;
+  setLastStatus(reason === "NO_CREDENTIALS" ? "Sign in to continue" : "Login required");
+  try {
+    await chrome.runtime.openOptionsPage();
+  } catch (err) {
+    console.warn("[RaterHubTracker] Failed to open options page", err);
+  }
 }
 
 function isInternalPage(sender) {
@@ -647,7 +659,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 (async () => {
   await loadAuthFromStorage();
   const creds = await loadStoredCredentials();
-  if (creds && !authState.accessToken) {
-    await login({ silent: true });
+  if (!creds) {
+    await promptInteractiveLogin("NO_CREDENTIALS");
+    return;
+  }
+
+  if (!authState.accessToken) {
+    const res = await login({ silent: true });
+    if (!res.ok) {
+      await promptInteractiveLogin(res.error || "LOGIN_FAILED");
+    }
   }
 })();
