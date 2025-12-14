@@ -7,6 +7,7 @@ const AUTH_KEY = "raterhubAuth_v1";
 const STATUS_KEY = "raterhubLastStatus_v1";
 const CREDENTIALS_KEY = "raterhubCredentials_v1";
 const CRYPTO_KEY = "raterhubCredentialsKey_v1";
+const POSITION_KEY = "raterhubTrackerPos_v2";
 const throttleMap = {};
 
 const MESSAGE_TYPES = {
@@ -16,6 +17,7 @@ const MESSAGE_TYPES = {
   SESSION_SUMMARY: "SESSION_SUMMARY",
   RESET_WIDGET_STATE: "RESET_WIDGET_STATE",
   SESSION_SUMMARY_RELAY: "SESSION_SUMMARY_RELAY",
+  RESET_WIDGET_POSITION: "RESET_WIDGET_POSITION",
 };
 
 let authState = {
@@ -609,6 +611,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
         return;
       }
+      case MESSAGE_TYPES.RESET_WIDGET_POSITION: {
+        if (!isInternalPage(sender) && sender?.url) {
+          sendResponse({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+        await chrome.storage.local.remove([POSITION_KEY]);
+        try {
+          const tabs = await chrome.tabs.query({ url: "https://*.raterhub.com/*" });
+          for (const tab of tabs) {
+            chrome.tabs
+              .sendMessage(tab.id, buildMessage(MESSAGE_TYPES.RESET_WIDGET_POSITION))
+              .catch(() => {});
+          }
+        } catch (err) {
+          console.warn("[RaterHubTracker] Failed to broadcast position reset", err);
+        }
+        sendResponse(buildMessage(MESSAGE_TYPES.RESET_WIDGET_POSITION, { ok: true }));
+        return;
+      }
       default:
         sendResponse({ ok: false, error: "UNKNOWN_MESSAGE" });
         return;
@@ -623,4 +644,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-loadAuthFromStorage();
+(async () => {
+  await loadAuthFromStorage();
+  const creds = await loadStoredCredentials();
+  if (creds && !authState.accessToken) {
+    await login({ silent: true });
+  }
+})();
